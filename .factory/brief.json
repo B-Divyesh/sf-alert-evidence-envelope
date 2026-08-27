@@ -1,0 +1,11 @@
+{
+  "slug": "alert-evidence-envelope",
+  "title": "Alert Evidence Envelope",
+  "territory": "devtools-data",
+  "user": "On-call engineers and webhook consumers who need a safe, sufficient incident excerpt with an alert instead of a bare dashboard link followed by extra authenticated lookups.",
+  "smallest_useful_product": "A webhook transformer that fetches a bounded configured query, redacts fields, attaches a signed evidence excerpt and query fingerprint, then forwards it to Slack/email/automation.",
+  "success_measure": "For 20 seeded alerts, responders can identify service, error signature, and first-seen time without opening the source dashboard in at least 16 cases.",
+  "artifact_class": "web-with-backend",
+  "monetization": "freemium",
+  "constraints": "Strict per-channel redaction, size caps, short-lived upstream credentials, no raw payload retention by default; preserve alert-provider signatures where possible."
+}
