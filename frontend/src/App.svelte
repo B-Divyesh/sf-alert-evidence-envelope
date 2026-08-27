@@ -1,0 +1,313 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+
+  type Config = {
+    id: string; name: string; source_url: string; destination_url: string;
+    destination_kind: string; query_pointer: string; evidence_pointer: string;
+    service_pointer: string; error_pointer: string; time_pointer: string;
+    redact_fields: string[]; max_items: number; max_bytes: number; enabled: boolean;
+  };
+  type Record = { id: string; service: string; status: string; fingerprint: string; created_at: string; evidence_items: number; evidence_bytes: number };
+  type Preset = { name: string; fields: string[] };
+
+  const slug = 'alert-evidence-envelope';
+  const billingBase = 'https://api.sociobot.in/api/v1';
+  const licenseKey = `sb_license:${slug}`;
+  const verdictKey = `${licenseKey}:verdict`;
+  const sampleAlert = `{
+  "service": "checkout-api",
+  "error": "payment authorization timed out",
+  "startsAt": "2026-08-27T14:32:08Z",
+  "query": "service=checkout-api level=error",
+  "evidence": [
+    {"timestamp":"2026-08-27T14:31:41Z","message":"gateway timeout after 8000ms","trace_id":"8af41b","email":"customer@example.com"},
+    {"timestamp":"2026-08-27T14:31:58Z","message":"retry budget exhausted","token":"sk_live_secret"}
+  ]
+}`;
+
+  let path = typeof location === 'undefined' ? '/' : location.pathname;
+  let online = typeof navigator === 'undefined' ? true : navigator.onLine;
+  let config: Config = {
+    id: 'primary', name: 'Primary incident route', source_url: '', destination_url: '', destination_kind: 'json',
+    query_pointer: '/query', evidence_pointer: '/evidence', service_pointer: '/service', error_pointer: '/error',
+    time_pointer: '/startsAt', redact_fields: ['authorization', 'password', 'token', 'email', 'cookie'],
+    max_items: 20, max_bytes: 32768, enabled: true,
+  };
+  let redactText = config.redact_fields.join(', ');
+  let adminToken = '';
+  let configState: 'loading' | 'ready' | 'saving' | 'saved' | 'error' = 'loading';
+  let configMessage = 'Reading the route…';
+  let sample = sampleAlert;
+  let preview: any = null;
+  let previewState: 'idle' | 'loading' | 'success' | 'error' = 'idle';
+  let previewMessage = '';
+  let deliveries: Record[] = [];
+  let copyMessage = '';
+  let license = '';
+  let licenseInput = '';
+  let unlocked = false;
+  let licenseMessage = 'Free core active';
+  let presetName = '';
+  let presets: Preset[] = [];
+
+  onMount(() => {
+    adminToken = localStorage.getItem('envelope:admin-token') || '';
+    presets = JSON.parse(localStorage.getItem('envelope:presets') || '[]');
+    const fromUrl = new URL(location.href).searchParams.get('license');
+    if (fromUrl) {
+      localStorage.setItem(licenseKey, fromUrl);
+      const clean = new URL(location.href); clean.searchParams.delete('license');
+      window.history.replaceState({}, '', clean.pathname + clean.search + clean.hash);
+    }
+    license = localStorage.getItem(licenseKey) || '';
+    void verifyLicense();
+    void loadConfig();
+    window.addEventListener('online', updateOnline);
+    window.addEventListener('offline', updateOnline);
+    return () => {
+      window.removeEventListener('online', updateOnline);
+      window.removeEventListener('offline', updateOnline);
+    };
+  });
+
+  function updateOnline() { online = navigator.onLine; }
+
+  async function api(pathname: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers);
+    headers.set('content-type', 'application/json');
+    if (adminToken) headers.set('authorization', `Bearer ${adminToken}`);
+    const response = await fetch(pathname, { ...options, headers });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Request failed with HTTP ${response.status}`);
+    return body;
+  }
+
+  async function loadConfig() {
+    configState = 'loading';
+    try {
+      const loaded = await api('/api/v1/config');
+      config = { ...loaded, source_url: loaded.source_url || '', destination_url: loaded.destination_url || '' };
+      redactText = config.redact_fields.join(', ');
+      configState = 'ready'; configMessage = 'Route loaded from this relay';
+      deliveries = await api('/api/v1/history');
+    } catch (error) {
+      configState = 'error';
+      configMessage = error instanceof Error ? error.message : 'Could not reach the relay';
+    }
+  }
+
+  async function saveConfig(event: SubmitEvent) {
+    event.preventDefault(); configState = 'saving'; configMessage = 'Checking and saving the route…';
+    localStorage.setItem('envelope:admin-token', adminToken);
+    const outgoing = {
+      ...config,
+      source_url: config.source_url.trim() || null,
+      destination_url: config.destination_url.trim() || null,
+      redact_fields: redactText.split(',').map((v) => v.trim()).filter(Boolean),
+    };
+    try {
+      const saved = await api('/api/v1/config', { method: 'PUT', body: JSON.stringify(outgoing) });
+      config = { ...saved, source_url: saved.source_url || '', destination_url: saved.destination_url || '' };
+      redactText = config.redact_fields.join(', ');
+      configState = 'saved'; configMessage = 'Route saved. New alerts use this policy.';
+    } catch (error) {
+      configState = 'error'; configMessage = error instanceof Error ? error.message : 'The route could not be saved';
+    }
+  }
+
+  async function runPreview() {
+    previewState = 'loading'; previewMessage = 'Bounding and redacting evidence…'; preview = null;
+    try {
+      const alert = JSON.parse(sample);
+      preview = await api('/api/v1/preview', {
+        method: 'POST', body: JSON.stringify({
+          alert,
+          redact_fields: redactText.split(',').map((v) => v.trim()).filter(Boolean),
+          max_items: config.max_items, max_bytes: config.max_bytes,
+        }),
+      });
+      previewState = 'success'; previewMessage = 'Envelope signed. No sample data was stored.';
+    } catch (error) {
+      previewState = 'error';
+      previewMessage = error instanceof SyntaxError ? 'Sample alert is not valid JSON. Check commas and quotes.' : (error instanceof Error ? error.message : 'Preview failed');
+    }
+  }
+
+  async function copy(value: string, message: string) {
+    try { await navigator.clipboard.writeText(value); copyMessage = message; }
+    catch { copyMessage = 'Clipboard access is unavailable. Select and copy the text manually.'; }
+  }
+
+  async function verifyLicense(force = false) {
+    license = localStorage.getItem(licenseKey) || '';
+    const cached = JSON.parse(localStorage.getItem(verdictKey) || 'null') as { valid: boolean; checkedAt: number } | null;
+    if (cached?.valid) { unlocked = true; licenseMessage = 'Field Kit unlocked'; }
+    if (!license) return;
+    if (!force && cached && Date.now() - cached.checkedAt < 86_400_000) {
+      unlocked = cached.valid; return;
+    }
+    try {
+      const response = await fetch(`${billingBase}/products/${slug}/verify?license=${encodeURIComponent(license)}`);
+      const result = await response.json();
+      unlocked = result.valid === true;
+      localStorage.setItem(verdictKey, JSON.stringify({ valid: unlocked, checkedAt: Date.now() }));
+      licenseMessage = unlocked ? 'Field Kit unlocked' : 'License no longer active';
+    } catch {
+      licenseMessage = unlocked ? 'Field Kit unlocked · verification pending' : 'Could not verify while offline';
+    }
+  }
+
+  async function restoreLicense(event: SubmitEvent) {
+    event.preventDefault();
+    if (!licenseInput.trim()) { licenseMessage = 'Paste a license token first'; return; }
+    localStorage.setItem(licenseKey, licenseInput.trim()); localStorage.removeItem(verdictKey);
+    licenseInput = ''; await verifyLicense(true);
+  }
+
+  function savePreset() {
+    if (!unlocked || !presetName.trim()) return;
+    presets = [...presets.filter((p) => p.name !== presetName.trim()), { name: presetName.trim(), fields: redactText.split(',').map((v) => v.trim()).filter(Boolean) }];
+    localStorage.setItem('envelope:presets', JSON.stringify(presets)); presetName = '';
+  }
+
+  function applyPreset(preset: Preset) { redactText = preset.fields.join(', '); configMessage = `Applied “${preset.name}”. Save the route to activate it.`; }
+  function formatBytes(bytes: number) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`; }
+  function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString(); }
+</script>
+
+<svelte:head>
+  <title>{path === '/privacy' ? 'Privacy — Alert Evidence Envelope' : path === '/terms' ? 'Terms — Alert Evidence Envelope' : 'Alert Evidence Envelope — bounded incident context'}</title>
+</svelte:head>
+
+<a class="skip-link" href="#main">Skip to main content</a>
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Alert Evidence Envelope home">
+    <svg aria-hidden="true" viewBox="0 0 48 48"><path d="M7 12h34v24H7z"/><path d="m8 14 16 12 16-12M14 8c4-4 16-4 20 0"/></svg>
+    <span>Alert Evidence<br /><em>Envelope</em></span>
+  </a>
+  <nav aria-label="Primary navigation">
+    {#if path === '/'}
+      <a href="#configure">Configure</a><a href="#test">Test route</a><a href="#field-kit">Field Kit</a>
+    {:else}<a href="/">Back to product</a>{/if}
+  </nav>
+  <span class:offline={!online} class="network"><i></i>{online ? 'Relay reachable' : 'Browser offline'}</span>
+</header>
+
+<main id="main">
+{#if path === '/privacy'}
+  <article class="legal">
+    <p class="eyebrow">FIELD NOTE · LEGAL 01</p><h1>Privacy, by boundary.</h1>
+    <p class="lede">The self-hosted core is designed to transform incident data without retaining raw alert bodies or raw fetched logs.</p>
+    <h2>What the relay stores</h2><p>SQLite stores channel configuration and a 20-entry delivery ledger: envelope ID, service label, delivery state, query fingerprint, time, item count, and byte count. It does not store raw inbound payloads, evidence excerpts, upstream tokens, destination tokens, or license tokens.</p>
+    <h2>Where secrets live</h2><p>Upstream and destination bearer tokens, admin access, and the signing key come from environment variables. Destination and source URLs may be stored in the local SQLite configuration. Browser license tokens and paid policy presets remain in your browser’s local storage.</p>
+    <h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification contacts Sociobot when a license is present, at most once per day. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
+    <h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them. For purchase records and refunds, contact Sociobot as merchant of record.</p>
+    <p class="updated">Effective 27 August 2026</p>
+  </article>
+{:else if path === '/terms'}
+  <article class="legal">
+    <p class="eyebrow">FIELD NOTE · LEGAL 02</p><h1>Terms of use.</h1>
+    <p class="lede">Alert Evidence Envelope is a transformation and delivery tool. It does not evaluate alerts, replace your incident system, or guarantee delivery.</p>
+    <h2>Operator responsibility</h2><p>You are responsible for endpoint authorization, lawful processing, redaction policies, destination access, secret rotation, and testing size limits before production use. Do not place credentials in JSON payloads or browser configuration.</p>
+    <h2>Field Kit license</h2><p>The $39 Field Kit is a one-time license for reusable local policy presets and operator templates. Sociobot/Dodo is the merchant of record. Refunds are handled there and revoke the license automatically. Accessibility, export, redaction, signing, and all safety controls remain free.</p>
+    <h2>Warranty and liability</h2><p>The software is provided “as is,” without warranties. To the extent permitted by law, contributors are not liable for lost data, missed notifications, or indirect damages. Validate the relay in your own environment and retain your source system as the record of truth.</p>
+    <h2>Acceptable use</h2><p>Do not use the service to access systems without permission, evade provider controls, or transmit data prohibited by your organization or applicable law.</p>
+    <p class="updated">Effective 27 August 2026</p>
+  </article>
+{:else}
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow">INCIDENT CARTOGRAPHY · RELAY 01</p>
+      <h1 id="hero-title">Send the evidence.<br />Not another link.</h1>
+      <p class="lede">Turn a webhook alert into a bounded, redacted, signed excerpt that people and automation can act on—without handing out broad dashboard access.</p>
+      <div class="hero-actions"><a class="button primary" href="#configure">Map your route</a><a class="button secondary" href="#test">Try a safe sample</a></div>
+      <ul class="trust-list" aria-label="Core guarantees"><li>Raw payloads are not retained</li><li>Evidence caps enforced before delivery</li><li>HMAC signature on every envelope</li></ul>
+    </div>
+    <figure class="terrain">
+      <picture><source media="(max-width: 700px)" srcset="/assets/evidence-terrain-960.webp" /><img src="/assets/evidence-terrain-1536.webp" width="1536" height="1024" fetchpriority="high" decoding="async" alt="An amber alert path crosses a topographic incident map, passes a redaction mark, and arrives at a sealed green envelope." /></picture>
+      <figcaption><span>BOUNDARY 32 KB</span><span>ROUTE VERIFIED</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="route" aria-labelledby="route-title">
+    <div class="section-heading"><p class="eyebrow">THE SAFE PASSAGE</p><h2 id="route-title">One alert. Four hard gates.</h2></div>
+    <ol class="route-stages">
+      <li><span>01</span><h3>Bound</h3><p>Use a fixed source and item/byte caps. Alert data cannot choose an arbitrary endpoint.</p></li>
+      <li><span>02</span><h3>Redact</h3><p>Remove sensitive keys recursively with a channel-specific policy before forwarding.</p></li>
+      <li><span>03</span><h3>Fingerprint</h3><p>Hash the configured query and source so responders know what shaped the excerpt.</p></li>
+      <li><span>04</span><h3>Seal</h3><p>Sign the final JSON envelope and preserve the provider signature in transit when present.</p></li>
+    </ol>
+  </section>
+
+  <section id="configure" class="workspace" aria-labelledby="configure-title">
+    <div class="workspace-intro"><p class="eyebrow">ROUTE BUILDER · PRIMARY</p><h2 id="configure-title">Map the handoff.</h2><p>URLs and policy live in this relay’s SQLite database. Put credentials only in environment variables.</p></div>
+    <div class="state-strip" class:error={configState === 'error'} class:success={configState === 'saved'} aria-live="polite"><span></span>{configMessage}</div>
+    <form onsubmit={saveConfig}>
+      <fieldset><legend><b>1</b> Name and state</legend>
+        <div class="form-grid"><label>Route name<input bind:value={config.name} required maxlength="80" /></label><label class="toggle"><input type="checkbox" bind:checked={config.enabled} /><span>Accept incoming alerts</span></label></div>
+      </fieldset>
+      <fieldset><legend><b>2</b> Locate evidence</legend>
+        <p class="field-help">Leave the source blank when evidence already arrives inside the alert. A remote source receives only <code>?q=…&amp;limit=…</code>.</p>
+        <div class="form-grid"><label>Fixed evidence source URL <span>optional</span><input type="url" bind:value={config.source_url} placeholder="https://logs.internal.example/query" aria-describedby="source-help" /></label><label>Query JSON pointer<input bind:value={config.query_pointer} required pattern="/.*" /></label><label>Embedded evidence pointer<input bind:value={config.evidence_pointer} required pattern="/.*" /></label><label>Upstream token<input value="UPSTREAM_BEARER_TOKEN" disabled /><small id="source-help">Set in the server environment; never entered here.</small></label></div>
+      </fieldset>
+      <fieldset><legend><b>3</b> Set the boundary</legend>
+        <div class="form-grid"><label>Redact keys <span>comma-separated</span><textarea bind:value={redactText} rows="3" required></textarea></label><div class="split"><label>Item cap<input type="number" bind:value={config.max_items} min="1" max="100" required /></label><label>Byte cap<input type="number" bind:value={config.max_bytes} min="1024" max="131072" step="1024" required /></label></div></div>
+      </fieldset>
+      <fieldset><legend><b>4</b> Address the envelope</legend>
+        <div class="form-grid"><label>Destination type<select bind:value={config.destination_kind}><option value="json">Automation webhook</option><option value="slack">Slack incoming webhook</option><option value="email-webhook">Email gateway webhook</option></select></label><label>Destination URL <span>optional if set by environment</span><input type="url" bind:value={config.destination_url} placeholder="https://hooks.example/…" /></label><label>Service JSON pointer<input bind:value={config.service_pointer} required pattern="/.*" /></label><label>Error JSON pointer<input bind:value={config.error_pointer} required pattern="/.*" /></label><label>First-seen JSON pointer<input bind:value={config.time_pointer} required pattern="/.*" /></label><label>Admin token <span>only if ADMIN_TOKEN is set</span><input type="password" bind:value={adminToken} autocomplete="off" /></label></div>
+      </fieldset>
+      <div class="form-actions"><button class="button primary" type="submit" disabled={configState === 'saving'}>{configState === 'saving' ? 'Saving route…' : 'Save route'}</button><code>POST {typeof location === 'undefined' ? '' : location.origin}/api/v1/relay/primary</code><button class="copy" type="button" onclick={() => copy(`${location.origin}/api/v1/relay/primary`, 'Relay URL copied')}>Copy URL</button></div>
+    </form>
+    <p class="sr-status" aria-live="polite">{copyMessage}</p>
+  </section>
+
+  <section id="test" class="test-bench" aria-labelledby="test-title">
+    <div class="section-heading"><p class="eyebrow">DRY RUN · NO RETENTION</p><h2 id="test-title">Inspect the envelope before it travels.</h2><p>Preview runs the same bounds, recursive redaction, fingerprint, and HMAC signing as the live relay. The sample is not written to the delivery ledger.</p></div>
+    <div class="bench-grid">
+      <div><label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build safe preview'}</button></div>
+      <div class="envelope-output" aria-busy={previewState === 'loading'}>
+        {#if previewState === 'idle'}<div class="empty"><svg aria-hidden="true" viewBox="0 0 64 64"><path d="M9 18h46v32H9zM10 20l22 17 22-17"/><path d="M24 12c5-5 11-5 16 0"/></svg><h3>No envelope yet</h3><p>Use the sample as-is or paste a real-shaped, sanitized alert.</p></div>
+        {:else if previewState === 'loading'}<div class="empty"><div class="loader" aria-hidden="true"></div><h3>Following the route</h3><p>Bounding → redacting → fingerprinting → signing</p></div>
+        {:else if previewState === 'error'}<div class="empty error-panel"><b>Preview stopped</b><p>{previewMessage}</p><button type="button" onclick={() => sample = sampleAlert}>Restore valid sample</button></div>
+        {:else}
+          <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
+          <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
+          <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
+          <p class="fingerprint"><span>Query fingerprint</span><code>{preview.query_fingerprint}</code></p>
+          <details><summary>Inspect signed JSON</summary><pre>{JSON.stringify(preview, null, 2)}</pre></details>
+          <button class="copy" type="button" onclick={() => copy(JSON.stringify(preview, null, 2), 'Signed envelope copied')}>Copy envelope JSON</button>
+        {/if}
+        <p class:bad={previewState === 'error'} class="bench-status" aria-live="polite">{previewMessage}</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="ledger" aria-labelledby="ledger-title">
+    <div class="section-heading"><p class="eyebrow">LOCAL LEDGER · LAST 20</p><h2 id="ledger-title">Delivery coordinates.</h2><p>Metadata only. Raw alerts and evidence are deliberately absent.</p></div>
+    {#if deliveries.length}
+      <div class="table-wrap"><table><thead><tr><th>Created</th><th>Service</th><th>Status</th><th>Evidence</th><th>Fingerprint</th></tr></thead><tbody>{#each deliveries as item}<tr><td data-label="Created">{formatDate(item.created_at)}</td><td data-label="Service">{item.service}</td><td data-label="Status"><span class="status-dot"></span>{item.status}</td><td data-label="Evidence">{item.evidence_items} · {formatBytes(item.evidence_bytes)}</td><td data-label="Fingerprint"><code>{item.fingerprint}</code></td></tr>{/each}</tbody></table></div>
+    {:else}<div class="ledger-empty"><span>∅</span><div><h3>No delivery metadata yet</h3><p>Send a live alert to the relay URL. Preview runs never appear here.</p></div></div>{/if}
+  </section>
+
+  <section id="field-kit" class="field-kit" aria-labelledby="kit-title">
+    <div><p class="eyebrow">OPTIONAL OPERATOR KIT</p><h2 id="kit-title">Carry policies between routes.</h2><p>The self-hosted relay, caps, redaction, signing, export, and all safety controls are free. A one-time <strong>$39 Field Kit</strong> unlocks unlimited named redaction presets on this device and reusable operator templates.</p><ul><li>Named Slack, customer-facing, and automation policies</li><li>One-click policy application before saving a route</li><li>No subscription and no hosted data dependency</li></ul><p class="merchant">Sociobot/Dodo is the merchant of record. Refunds are handled there.</p></div>
+    <div class="license-card" class:unlocked>
+      <span class="license-state">{unlocked ? '✓ LICENSE ACTIVE' : 'FIELD KIT · $39 ONCE'}</span>
+      {#if unlocked}
+        <label>Preset name<input bind:value={presetName} maxlength="40" placeholder="Customer-facing Slack" /></label><button class="button primary" type="button" onclick={savePreset}>Save current redaction policy</button>
+        {#if presets.length}<ul class="presets">{#each presets as preset}<li><button type="button" onclick={() => applyPreset(preset)}><b>{preset.name}</b><span>{preset.fields.join(', ')}</span></button></li>{/each}</ul>{:else}<p class="quiet">No presets yet. Name the current policy to keep it locally.</p>{/if}
+      {:else}
+        <a class="button primary" href={`${billingBase}/products/${slug}/checkout`}>Buy the Field Kit</a>
+        <form class="restore" onsubmit={restoreLicense}><label for="license-token">Have a license? Paste it</label><div><input id="license-token" type="password" bind:value={licenseInput} autocomplete="off" /><button type="submit">Verify license</button></div></form>
+      {/if}
+      <p class="license-message" aria-live="polite">{licenseMessage}</p>
+    </div>
+  </section>
+{/if}
+</main>
+
+<footer>
+  <div><a class="brand footer-brand" href="/"><svg aria-hidden="true" viewBox="0 0 48 48"><path d="M7 12h34v24H7z"/><path d="m8 14 16 12 16-12"/></svg><span>Alert Evidence Envelope</span></a><p>A portable, least-privilege incident artifact.</p></div>
+  <div class="footer-links"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/B-Divyesh/sf-alert-evidence-envelope">Source</a></div>
+  <p class="provenance">Original generated cartography · No analytics · MIT licensed</p>
+</footer>
