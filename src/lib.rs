@@ -417,11 +417,22 @@ async fn fetch_evidence(state: &AppState, config: &ChannelConfig, alert: &Value)
     url.query_pairs_mut().append_pair("q", &query).append_pair("limit", &config.max_items.to_string());
     let mut request = state.client.get(url);
     if let Some(token) = &state.upstream_token { request = request.bearer_auth(token.as_str()); }
-    let response = request.send().await.map_err(|e| ApiError::Upstream(clean_network_error(&e.to_string())))?;
+    let mut response = request.send().await.map_err(|e| ApiError::Upstream(clean_network_error(&e.to_string())))?;
     if !response.status().is_success() {
         return Err(ApiError::Upstream(format!("source returned HTTP {}", response.status().as_u16())));
     }
-    let value: Value = response.json().await.map_err(|_| ApiError::Upstream("source response was not JSON".into()))?;
+    let response_cap = config.max_bytes.saturating_mul(4).clamp(262_144, 524_288);
+    if response.content_length().is_some_and(|size| size > response_cap as u64) {
+        return Err(ApiError::Upstream(format!("source response exceeded the {} byte fetch cap", response_cap)));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| ApiError::Upstream(clean_network_error(&e.to_string())))? {
+        if body.len() + chunk.len() > response_cap {
+            return Err(ApiError::Upstream(format!("source response exceeded the {} byte fetch cap", response_cap)));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let value: Value = serde_json::from_slice(&body).map_err(|_| ApiError::Upstream("source response was not JSON".into()))?;
     let data = value.get("data").or_else(|| value.get("results")).unwrap_or(&value);
     match data {
         Value::Array(items) => Ok(items.clone()),
@@ -549,6 +560,8 @@ async fn record_delivery(db: &SqlitePool, channel: &str, envelope: &EvidenceEnve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{body::{to_bytes, Body}, http::Request};
+    use tower::ServiceExt;
 
     #[test]
     fn recursively_redacts_and_bounds_evidence() {
@@ -584,5 +597,42 @@ mod tests {
         assert_eq!(output.evidence_items, 0);
         assert!(output.truncated);
         assert!(output.evidence_bytes <= 1024);
+    }
+
+    #[tokio::test]
+    async fn http_routes_complete_a_local_relay_workflow() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite:{}", file.path().display());
+        let state = create_state(&database_url).await.unwrap();
+        let app = api_router(state);
+
+        let health = app.clone().oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let config = app.clone().oneshot(Request::builder().uri("/api/v1/config").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(config.status(), StatusCode::OK);
+
+        let preview_body = json!({"alert":{"service":"api","error":"boom","evidence":[{"token":"secret"}]}}).to_string();
+        let preview = app.clone().oneshot(Request::builder().method("POST").uri("/api/v1/preview").header("content-type", "application/json").body(Body::from(preview_body)).unwrap()).await.unwrap();
+        assert_eq!(preview.status(), StatusCode::OK);
+        let bytes = to_bytes(preview.into_body(), 100_000).await.unwrap();
+        let preview_json: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(preview_json["evidence"][0]["token"], "[REDACTED]");
+
+        let relay_body = json!({"service":"api","error":"boom","startsAt":"2026-08-27T00:00:00Z","evidence":[{"message":"failed"}]}).to_string();
+        let relay = app.clone().oneshot(Request::builder().method("POST").uri("/api/v1/relay/primary").header("content-type", "application/json").header("x-signature", "provider-sig").body(Body::from(relay_body)).unwrap()).await.unwrap();
+        assert_eq!(relay.status(), StatusCode::ACCEPTED);
+
+        let history = app.clone().oneshot(Request::builder().uri("/api/v1/history").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(history.status(), StatusCode::OK);
+        let bytes = to_bytes(history.into_body(), 100_000).await.unwrap();
+        let history_json: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(history_json.as_array().unwrap().len(), 1);
+
+        let mut updated = ChannelConfig::default();
+        updated.name = "Changed route".into();
+        let request = Request::builder().method("PUT").uri("/api/v1/config").header("content-type", "application/json").body(Body::from(serde_json::to_vec(&updated).unwrap())).unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

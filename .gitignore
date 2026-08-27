@@ -4,4 +4,4 @@ target/
 data/
 .env
 *.db
-
+graphify-out/

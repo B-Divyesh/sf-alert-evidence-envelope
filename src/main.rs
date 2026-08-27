@@ -4,6 +4,7 @@ use axum::Router;
 use std::{env, net::SocketAddr};
 use tokio::signal;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -22,14 +23,20 @@ async fn main() -> anyhow::Result<()> {
     let state = create_state(&database_url).await?;
     let static_dir = env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let index = format!("{static_dir}/index.html");
+    let governor = GovernorConfigBuilder::default()
+        .per_second(200)
+        .burst_size(300)
+        .finish()
+        .expect("valid rate limit configuration");
     let app = Router::new()
         .merge(api_router(state))
-        .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index)));
+        .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index)))
+        .layer(GovernorLayer::new(governor));
     let port: u16 = env::var("PORT").unwrap_or_else(|_| "8080".into()).parse().context("PORT must be a valid TCP port")?;
     let address = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(address).await?;
     info!(%address, "alert evidence envelope listening");
-    axum::serve(listener, app).with_graceful_shutdown(shutdown()).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(shutdown()).await?;
     Ok(())
 }
 
