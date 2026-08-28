@@ -5,3 +5,6 @@ data/
 .env
 *.db
 graphify-out/
+test-results/
+playwright-report/
+.factory/evidence/

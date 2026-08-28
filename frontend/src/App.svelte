@@ -51,7 +51,6 @@
   let presets: Preset[] = [];
 
   onMount(() => {
-    adminToken = localStorage.getItem('envelope:admin-token') || '';
     presets = JSON.parse(localStorage.getItem('envelope:presets') || '[]');
     const fromUrl = new URL(location.href).searchParams.get('license');
     if (fromUrl) {
@@ -98,7 +97,6 @@
 
   async function saveConfig(event: SubmitEvent) {
     event.preventDefault(); configState = 'saving'; configMessage = 'Checking and saving the route…';
-    localStorage.setItem('envelope:admin-token', adminToken);
     const outgoing = {
       ...config,
       source_url: config.source_url.trim() || null,

@@ -32,3 +32,13 @@ test('legal routes have one heading and a main landmark', async ({ page }) => {
     await expect(page.locator('main')).toBeVisible();
   }
 });
+
+test('keeps the current shell usable and reports offline state', async ({ page, context }) => {
+  await page.goto('/');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByText('Browser offline')).toBeAttached();
+  await expect(page.locator('h1')).toContainText('Send the evidence.');
+  await context.setOffline(false);
+});
