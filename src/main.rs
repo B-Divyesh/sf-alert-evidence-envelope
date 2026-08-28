@@ -5,6 +5,7 @@ use axum::{
     http::{header, HeaderName, HeaderValue},
     middleware::{self, Next},
     response::Response,
+    routing::get_service,
     Router,
 };
 use std::{env, net::SocketAddr};
@@ -45,6 +46,16 @@ async fn main() -> anyhow::Result<()> {
         .expect("valid rate limit configuration");
     let app = Router::new()
         .merge(api_router(state))
+        // Legal pages must also work for direct links, crawlers, and clients
+        // without JavaScript; serve their complete static documents explicitly.
+        .route_service(
+            "/privacy",
+            get_service(ServeFile::new(format!("{static_dir}/privacy.html"))),
+        )
+        .route_service(
+            "/terms",
+            get_service(ServeFile::new(format!("{static_dir}/terms.html"))),
+        )
         .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index)))
         .layer(GovernorLayer::new(governor))
         .layer(middleware::from_fn(cache_policy))

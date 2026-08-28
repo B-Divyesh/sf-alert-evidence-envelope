@@ -1,0 +1,14 @@
+/* The policy card must be allowed to shrink before the phone layout stacks it. */
+.field-kit {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: clamp(32px, 6vw, 80px);
+}
+
+.field-kit > div:first-child,
+.license-card {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .field-kit { grid-template-columns: minmax(0, 1fr); }
+}

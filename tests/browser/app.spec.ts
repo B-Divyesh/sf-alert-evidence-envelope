@@ -25,12 +25,40 @@ test('has no serious accessibility violations', async ({ page }) => {
   }
 });
 
-test('legal routes have one heading and a main landmark', async ({ page }) => {
+test('legal routes are direct-linkable documents, including without JavaScript', async ({ page, browser }) => {
   for (const path of ['/privacy', '/terms']) {
-    await page.goto(path);
+    const response = await page.goto(path);
+    expect(response?.status(), `${path} must be a direct-linkable legal document`).toBe(200);
     await expect(page.locator('h1')).toHaveCount(1);
     await expect(page.locator('main')).toBeVisible();
+    const noJavaScript = await browser.newContext({ javaScriptEnabled: false });
+    const staticPage = await noJavaScript.newPage();
+    const staticResponse = await staticPage.goto(path);
+    expect(staticResponse?.status(), `${path} must be useful without JavaScript`).toBe(200);
+    await expect(staticPage.locator('main')).toContainText(path === '/privacy' ? 'What the relay stores' : 'Operator responsibility');
+    await noJavaScript.close();
   }
+});
+
+test('reports the compiled immutable build identity', async ({ request }) => {
+  const response = await request.get('/health');
+  expect(response.status()).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    status: 'ok',
+    build: '5e9f77e56c4f28e6b1d848d3de611091bce8bb83',
+  });
+});
+
+test('never widens the 390px mobile viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const widths = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: window.innerWidth,
+    fieldKit: Math.ceil(document.querySelector<HTMLElement>('.field-kit')!.getBoundingClientRect().width),
+  }));
+  expect(widths.fieldKit).toBeLessThanOrEqual(widths.viewport);
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
 });
 
 test('keeps the current shell usable and reports offline state', async ({ page, context }) => {
@@ -41,4 +69,14 @@ test('keeps the current shell usable and reports offline state', async ({ page, 
   await expect(page.getByText('Browser offline')).toBeAttached();
   await expect(page.locator('h1')).toContainText('Send the evidence.');
   await context.setOffline(false);
+});
+
+test('keeps an updateable offline shell', async ({ page }) => {
+  await page.goto('/');
+  const shell = await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    await registration.update();
+    return (await caches.keys()).includes('envelope-shell-v2');
+  });
+  expect(shell).toBe(true);
 });

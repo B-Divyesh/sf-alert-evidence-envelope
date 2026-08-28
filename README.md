@@ -98,7 +98,7 @@ docker run --read-only --tmpfs /tmp -p 8080:8080 \
   alert-evidence-envelope
 ```
 
-The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. The factory owns production deployment, DNS, TLS, and billing registration.
+The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. It compiles the checked-out Git commit into `/health` as `build`; optionally pass `--build-arg BUILD_SHA=<40-character-commit>` when building an exported source tree without Git metadata. The factory owns production deployment, DNS, TLS, and billing registration.
 
 ## Paid Field Kit
 

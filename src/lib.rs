@@ -782,8 +782,10 @@ mod tests {
             json!({"message":"failed", "user":{"email":"a@example.com"}, "token":"secret"}),
             json!({"message":"second"}),
         ];
-        let mut config = ChannelConfig::default();
-        config.max_items = 1;
+        let config = ChannelConfig {
+            max_items: 1,
+            ..Default::default()
+        };
         let output = build_envelope(&alert, evidence, &config, b"test-key", true).unwrap();
         assert_eq!(output.summary.service, "checkout");
         assert_eq!(output.evidence_items, 1);
@@ -796,8 +798,10 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_remote_urls() {
-        let mut config = ChannelConfig::default();
-        config.source_url = Some("http://logs.example.com/query".into());
+        let mut config = ChannelConfig {
+            source_url: Some("http://logs.example.com/query".into()),
+            ..Default::default()
+        };
         assert!(validate_config(&config).is_err());
         config.source_url = Some("http://localhost:9090/query".into());
         assert!(validate_config(&config).is_ok());
@@ -805,8 +809,10 @@ mod tests {
 
     #[test]
     fn clips_by_serialized_byte_size() {
-        let mut config = ChannelConfig::default();
-        config.max_bytes = 1024;
+        let config = ChannelConfig {
+            max_bytes: 1024,
+            ..Default::default()
+        };
         let evidence = vec![
             json!({"message":"x".repeat(2000)}),
             json!({"message":"small"}),
@@ -869,9 +875,11 @@ mod tests {
             .unwrap();
         assert_eq!(config.status(), StatusCode::OK);
 
-        let mut updated = ChannelConfig::default();
-        updated.name = "Changed route".into();
-        updated.destination_url = Some(destination);
+        let updated = ChannelConfig {
+            name: "Changed route".into(),
+            destination_url: Some(destination),
+            ..Default::default()
+        };
         let request = Request::builder()
             .method("PUT")
             .uri("/api/v1/config")
