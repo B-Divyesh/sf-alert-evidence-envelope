@@ -1,80 +1,97 @@
-# Alert Evidence Envelope — verification handoff
+# Alert Evidence Envelope — repair handoff
 
-## Verification 1 status: **FAIL**
+## Release status
 
-Independent verification on 2026-08-28 tested candidate
-`109a9714bddb00ebc26ae28158c709332b1c6352` and
-`https://alert-evidence-envelope.sociobot.in`.
+The three P1 findings in independent verification report
+[`verification-1.md`](verification-1.md) have been repaired. The implementation
+commit is `a6a4aa0ee09b0b90796e36865ac3e60772191164` on `main`; deploy the
+checked-out final `HEAD` with the container work order.
 
-Do not release this candidate. The detailed, reproducible report is in
-[`verification-1.md`](verification-1.md). Blocking defects are: `/privacy`
-and `/terms` return HTTP 404, the UI horizontally overflows by 24px at a 390px
-viewport, and live `/health` returns build `development` instead of an
-immutable build SHA, so backend candidate identity cannot be confirmed.
+## What changed
 
-The candidate's live JavaScript and CSS hashes do exactly match a fresh local
-production build. `npm test` and additional local relay/security checks pass;
-the release decision remains FAIL until the three blockers are fixed and
-re-verified.
+- `/privacy` and `/terms` are now explicit HTTP 200 routes serving complete,
+  self-hosted static legal documents. They keep one `h1`, a `main` landmark,
+  product navigation, and useful copy with JavaScript disabled. Unknown routes
+  still return the SPA fallback with HTTP 404.
+- The Field Kit now uses shrinkable grid tracks and a bounded responsive gap,
+  so a 390px viewport cannot be widened by the policy card.
+- The container compiler receives an immutable `BUILD_SHA`: it uses an explicit
+  Docker build argument when supplied, otherwise derives the checked-out Git
+  commit from the build context. `/health` therefore reports the compiled
+  identity rather than `development`. `.git` exists only in the intermediate
+  Rust build stage and is absent from the final non-root runtime image.
+- The previous four Clippy test-code warnings are resolved, so strict linting
+  is warning-free.
 
----
+## Regression coverage
 
-# Alert Evidence Envelope — build handoff (builder report, superseded by verification status above)
+Playwright now asserts all repaired contracts in both desktop Chromium and the
+390 × 844 Chromium project:
 
-Date: 2026-08-28
-
-Work order: `alert-evidence-envelope-build-1`
-Commit base: `8383c81d39f0471b5c4f870c77bfd181a5df4078`
-
-## What shipped
-
-- A Rust/Axum relay with SQLite configuration and metadata-only delivery history.
-- `POST /api/v1/relay/primary` accepts bounded JSON, either extracts embedded evidence or fetches from one configured HTTPS source, recursively redacts configured key names, enforces item and serialized byte caps, computes a source/query SHA-256 fingerprint, signs the compact envelope with HMAC-SHA256, preserves recognized provider signatures in transit, and delivers to JSON automation, Slack, or an email-gateway webhook.
-- Upstream responses are stream-read with a 256–512 KB hard ceiling. Inbound bodies stop at 256 KB. URLs require HTTPS except localhost development. Per-IP rate limiting allows a 300-request burst and replenishes at 200 requests/second.
-- Optional `ADMIN_TOKEN` and `INBOUND_TOKEN` boundaries use constant-time comparison. Credentials and signing keys are environment-only. Raw alerts and evidence are never written to SQLite or logs.
-- A responsive Svelte route builder, no-retention preview, explicit loading/error/offline/empty/success states, delivery ledger, copy controls, and local-only paid redaction presets.
-- A $39 one-time Field Kit using the Sociobot hosted checkout, query-string license capture, `sb_license:alert-evidence-envelope` local storage, at-most-daily verification, optimistic offline unlock, invalid-license reconciliation, and paste-to-restore. Core safety, relay, preview, export/copy, and accessibility remain free.
-- `/privacy` and `/terms`, full README, MIT license, third-party font notices, Dockerfile, service-worker offline shell, responsive topographic hero, light/dark themes, and reduced-motion behavior.
-- The original generated cartographic source and prompt metadata are under `assets/src/`; responsive WebPs ship under `frontend/static/assets/`.
+- direct `/privacy` and `/terms` navigations return HTTP 200, and their legal
+  copy is present in a JavaScript-disabled context;
+- the document and Field Kit widths do not exceed 390px;
+- `/health` returns the exact compile-time test SHA;
+- the skip link is the first keyboard target and has a visible focus outline;
+- the offline shell remains updateable (`registration.update()` and
+  `envelope-shell-v2`).
 
 ## Verification performed
 
-`npm test` passes from the repository root. It runs:
+On 2026-08-28, from a clean `npm ci`:
 
-- `svelte-check`: 0 errors, 0 warnings.
-- Rust tests: 4 passed. Coverage includes recursive redaction, item/byte truncation, endpoint validation, all API routes, real forwarding to a local destination, preserved provider and envelope signature headers, and metadata history.
-- Vite production build: output is exactly `dist/`, with `dist/index.html` at its root.
-- Playwright 1.58.2: 8/8 passed across desktop Chromium and Chromium at 390 × 844. The suite exercises the signed preview, redaction output, offline state and cached-shell reload, legal routes, one-h1/main semantics, page console, and axe WCAG AA in light and dark modes.
-
-Additional checks:
-
-- Factory `verify-url.sh`: HTTP 200, title present, `lang=en`, exactly one `h1`, main landmark present, zero missing alt attributes, zero unlabeled buttons, zero console/page errors; measured local load 575 ms.
-- Lighthouse 12.8.2 mobile: **Performance 98, Accessibility 100, Best Practices 100, SEO 100**; LCP 2.3 s, CLS 0, TBT 20 ms, total transfer 270 KiB.
-- Initial assets: JS 63.19 KB raw / 24.55 KB gzip, CSS 16.08 KB raw / 4.68 KB gzip, fonts 114 KB total, mobile hero 75 KB WebP. All individual budgets pass (JS ≤200 KB, CSS ≤50 KB, fonts ≤120 KB, hero ≤300 KB).
-- Live local relay smoke returned HTTP 202, extracted service/error/first-seen, redacted `email` and `token`, set the query fingerprint and HMAC, and marked the provider signature preserved.
-- Load smoke: 500 health requests at concurrency 20 returned 500 HTTP 200 responses in approximately two seconds.
-- `npm audit --omit=dev`: 0 production vulnerabilities; full npm audit was also clean after upgrading Svelte/Vite.
-- Response headers verified: CSP, `nosniff`, no-referrer, API `no-store`, and immutable caching on static assets.
+- `npm test` passed: Svelte type check (0 errors/warnings), Rust unit and
+  integration tests (4 passed), production Vite build, and Playwright **16/16**.
+  The browser coverage includes the signed/redacted preview, keyboard-accessible
+  document structure, axe serious/critical checks in light and dark schemes,
+  desktop, 390px mobile, offline reload, service-worker update, legal pages,
+  no-JS legal content, and console-error checks.
+- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`,
+  `git diff --check`, and `npm audit --omit=dev` all passed. There is no
+  publishable package or consumer artifact for this web-with-backend product.
+- `npm run build` produced `dist/`: JS 63,161 B raw / 24,550 B gzip; CSS
+  16,300 B raw / 4,720 B gzip; self-hosted fonts 115,560 B total; mobile hero
+  75,882 B. All configured static budgets pass.
+- A locally compiled production server with
+  `BUILD_SHA=0123456789abcdef0123456789abcdef01234567` returned exactly that
+  build ID from `/health`; `/`, `/privacy`, and `/terms` returned 200;
+  `/not-a-route` remained 404. The legal response contains its no-JS marker.
+  CSP, `nosniff`, `no-referrer`, and `no-cache` headers were present.
+- The factory `verify-url.sh` smoke against that local server passed: 572 ms
+  load, zero page/console errors, `lang=en`, title, one `h1`, `main`, and no
+  missing image alt text or unlabeled buttons.
+- Lighthouse 13.4.1 was attempted with the supplied Playwright Chromium; its
+  launcher could not connect to that browser in this worker, so no synthetic
+  score is claimed. Bundle budgets and the browser accessibility checks above
+  are the available local performance evidence.
 
 ## Run and deploy
 
 ```sh
 npm ci
 npm test
-npm run build
-ENVELOPE_SIGNING_KEY='a-long-random-key' cargo run --locked
+cargo clippy --all-targets --locked -- -D warnings
+docker build -t alert-evidence-envelope .
 ```
 
-Container build command: `docker build -t alert-evidence-envelope .`
+The Dockerfile derives the final Git SHA automatically when `.git` is in the
+build context. For an exported source tree, provide
+`--build-arg BUILD_SHA=$(git rev-parse HEAD)`. The factory deployment command
+is:
 
-Container listens on `PORT` (default 8080), runs non-root, serves `dist/`, and expects persistent `/data`.
+```sh
+/opt/fleet/lib/deploy-container.sh alert-evidence-envelope /work/repo Dockerfile 8080
+```
 
-Required production values: a strong `ENVELOPE_SIGNING_KEY`, `ADMIN_TOKEN`, and preferably `INBOUND_TOKEN`. Configure short-lived `UPSTREAM_BEARER_TOKEN`, `DESTINATION_URL`, and `DESTINATION_BEARER_TOKEN` only when needed.
+After deployment, verify that `https://alert-evidence-envelope.sociobot.in/health`
+returns the deployed final commit, `/privacy` and `/terms` are HTTP 200, and
+the 390px browser regression suite remains green.
 
-## Known gaps / factory follow-up
+## Known gaps
 
-- The container recipe was not executed because this worker image has no Docker, Podman, or Buildah binary. Native locked Rust build/tests and the exact Vite artifact passed; the Dockerfile uses Node 22 Alpine and Rust 1.98 Alpine build stages with a non-root Alpine runtime.
-- External observability sources, Slack, email gateways, and the production Sociobot billing endpoint were not called with real credentials. HTTP forwarding is integration-tested against a local capture server. The factory must register/switch the billing product at release as specified by the work order.
-- The source adapter is deliberately vendor-neutral: fixed GET endpoint plus `q` and `limit`, accepting an array or `{data|results}`. Vendor-specific pagination, POST query bodies, and native SMTP are v2 adapter work; email v1 uses a configured webhook gateway.
-- HMAC verification requires compact JSON in schema field order after blanking `signature`; README documents this. A future detached-JWS profile would improve cross-language canonicalization.
-- Deployment TLS, ingress allowlisting, DNS, backup policy, and secret rotation remain factory/operator responsibilities.
+- This worker has no Docker/Podman/Buildah binary, so the image cannot be
+  built locally. The factory ACR container build is the deployment verification
+  path; it is configured to compile the Git SHA into the backend.
+- The external observability endpoints, downstream destination, and billing
+  endpoint remain uncalled without operator credentials. Local relay coverage
+  uses a capture server and preserves the no-retention boundary.

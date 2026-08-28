@@ -25,6 +25,14 @@ test('has no serious accessibility violations', async ({ page }) => {
   }
 });
 
+test('exposes the skip link as the first keyboard target', async ({ page }) => {
+  await page.goto('/');
+  await page.keyboard.press('Tab');
+  const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+  await expect(skipLink).toBeFocused();
+  await expect(skipLink).toHaveCSS('outline-style', 'solid');
+});
+
 test('legal routes are direct-linkable documents, including without JavaScript', async ({ page, browser }) => {
   for (const path of ['/privacy', '/terms']) {
     const response = await page.goto(path);
