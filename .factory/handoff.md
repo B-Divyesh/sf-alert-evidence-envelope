@@ -3,9 +3,10 @@
 ## Release status
 
 The three P1 findings in independent verification report
-[`verification-1.md`](verification-1.md) have been repaired. The implementation
-commit is `a6a4aa0ee09b0b90796e36865ac3e60772191164` on `main`; deploy the
-checked-out final `HEAD` with the container work order.
+[`verification-1.md`](verification-1.md) have been repaired and deployed. The
+runtime release commit is `11bdcb769159e09067b8bea285463ce2633ffb13` on
+`main` (following the primary repair commit
+`a6a4aa0ee09b0b90796e36865ac3e60772191164`).
 
 ## What changed
 
@@ -88,6 +89,29 @@ az acr build --registry sociobotregistry \
 After deployment, verify that `https://alert-evidence-envelope.sociobot.in/health`
 returns the deployed final commit, `/privacy` and `/terms` are HTTP 200, and
 the 390px browser regression suite remains green.
+
+## Deployment evidence
+
+The SHA-pinned ACR build `ch8h` completed successfully on 2026-08-28, producing
+`sociobotregistry.azurecr.io/sf-alert-evidence-envelope:11bdcb769159`. The
+factory container helper deployed that prebuilt image to port 8080.
+
+Live verification at `https://alert-evidence-envelope.sociobot.in` found:
+
+- `/health` returned `{"build":"11bdcb769159e09067b8bea285463ce2633ffb13","status":"ok"}`.
+- `/`, `/privacy`, and `/terms` returned HTTP 200; `/not-a-route` returned
+  HTTP 404. The privacy response contains “What the relay stores” before any
+  JavaScript executes.
+- CSP, `nosniff`, `no-referrer`, and `no-cache` headers are present on the
+  legal document.
+- Live desktop Chromium had one `h1` and one `main`; its first Tab focused the
+  visible skip link; there were zero page/console errors and zero external
+  requests before any license is stored. Axe reported zero serious/critical
+  WCAG A/AA violations.
+- At 390px, document width, viewport width, and Field Kit width were all
+  exactly 390px. The live service worker accepted `registration.update()` and
+  retained `envelope-shell-v2`; a JavaScript-disabled `/privacy` request was
+  HTTP 200 with its legal content present.
 
 ## Known gaps
 
