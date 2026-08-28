@@ -33,18 +33,15 @@ test('exposes the skip link as the first keyboard target', async ({ page }) => {
   await expect(skipLink).toHaveCSS('outline-style', 'solid');
 });
 
-test('legal routes are direct-linkable documents, including without JavaScript', async ({ page, browser }) => {
+test('legal routes are direct-linkable documents, including without JavaScript', async ({ page, request }) => {
   for (const path of ['/privacy', '/terms']) {
+    const staticResponse = await request.get(path);
+    expect(staticResponse.status(), `${path} must be useful without JavaScript`).toBe(200);
+    expect(await staticResponse.text()).toContain(path === '/privacy' ? 'What the relay stores' : 'Operator responsibility');
     const response = await page.goto(path);
     expect(response?.status(), `${path} must be a direct-linkable legal document`).toBe(200);
     await expect(page.locator('h1')).toHaveCount(1);
     await expect(page.locator('main')).toBeVisible();
-    const noJavaScript = await browser.newContext({ javaScriptEnabled: false });
-    const staticPage = await noJavaScript.newPage();
-    const staticResponse = await staticPage.goto(path);
-    expect(staticResponse?.status(), `${path} must be useful without JavaScript`).toBe(200);
-    await expect(staticPage.locator('main')).toContainText(path === '/privacy' ? 'What the relay stores' : 'Operator responsibility');
-    await noJavaScript.close();
   }
 });
 
@@ -53,7 +50,7 @@ test('reports the compiled immutable build identity', async ({ request }) => {
   expect(response.status()).toBe(200);
   await expect(response.json()).resolves.toEqual({
     status: 'ok',
-    build: '5e9f77e56c4f28e6b1d848d3de611091bce8bb83',
+    build: process.env.PLAYWRIGHT_EXPECTED_BUILD_SHA,
   });
 });
 

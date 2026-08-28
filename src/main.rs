@@ -1,4 +1,4 @@
-use alert_evidence_envelope::{api_router, create_state};
+use alert_evidence_envelope::{api_router, create_state, load_or_generate_signing_key};
 use anyhow::Context;
 use axum::{
     extract::Request,
@@ -33,10 +33,18 @@ async fn main() -> anyhow::Result<()> {
     if database_url.starts_with("sqlite:data/") {
         std::fs::create_dir_all("data")?;
     }
-    if env::var("ENVELOPE_SIGNING_KEY").is_err() {
-        tracing::warn!("ENVELOPE_SIGNING_KEY is unset; using an insecure development key");
-    }
-    let state = create_state(&database_url).await?;
+    let signing_key_path =
+        env::var("SIGNING_KEY_FILE").unwrap_or_else(|_| "data/envelope-signing.key".into());
+    let supplied_signing_key = env::var("ENVELOPE_SIGNING_KEY").ok();
+    let (signing_key, signing_key_source) = load_or_generate_signing_key(
+        std::path::Path::new(&signing_key_path),
+        supplied_signing_key.as_deref(),
+    )?;
+    info!(
+        signing_key_source = signing_key_source.label(),
+        "runtime signing key configured"
+    );
+    let state = create_state(&database_url, signing_key).await?;
     let static_dir = env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let index = format!("{static_dir}/index.html");
     let governor = GovernorConfigBuilder::default()

@@ -33,7 +33,8 @@ Open `http://localhost:8080`. For split frontend/backend development, run `cargo
 | `PORT` | `8080` | HTTP listener |
 | `DATABASE_URL` | `sqlite:data/envelopes.db?mode=rwc` | Local metadata/config database |
 | `STATIC_DIR` | `dist` | Built frontend directory |
-| `ENVELOPE_SIGNING_KEY` | insecure development value | HMAC-SHA256 key; required in production |
+| `ENVELOPE_SIGNING_KEY` | unset | Optional 32-byte-minimum HMAC-SHA256 key override; otherwise a CSPRNG key is generated once and persisted locally |
+| `SIGNING_KEY_FILE` | `data/envelope-signing.key` | Persistent generated-key path (container default: `/data/envelope-signing.key`) |
 | `ADMIN_TOKEN` | unset | Optional bearer token protecting config, preview, and history routes |
 | `INBOUND_TOKEN` | unset | Optional `x-envelope-token` required on incoming relay requests |
 | `UPSTREAM_BEARER_TOKEN` | unset | Short-lived bearer token for the fixed evidence source |
@@ -94,11 +95,10 @@ This is a 100+ requests/second health-route smoke on ordinary development hardwa
 docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t alert-evidence-envelope .
 docker run --read-only --tmpfs /tmp -p 8080:8080 \
   -v envelope-data:/data \
-  -e ENVELOPE_SIGNING_KEY='replace-me' \
   alert-evidence-envelope
 ```
 
-The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. Pass the immutable 40-character commit with `--build-arg BUILD_SHA=<commit>`; it is compiled into `/health` as `build` and recorded in the image revision label. A local build without that argument reports the explicit `development` identity—never an empty value. The factory owns production deployment, DNS, TLS, and billing registration.
+The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. It starts with only `PORT`: on first boot it creates a random 256-bit signing key in `/data`, retains it for stable envelope verification, and logs only whether the key was generated, persisted, or supplied. `ENVELOPE_SIGNING_KEY` remains an optional 32-byte-minimum override. Pass the immutable 40-character commit with `--build-arg BUILD_SHA=<commit>`; it is compiled into `/health` as `build` and recorded in the image revision label. A local build without that argument reports the explicit `development` identity—never an empty value. The factory owns production deployment, DNS, TLS, and billing registration.
 
 ## Paid Field Kit
 

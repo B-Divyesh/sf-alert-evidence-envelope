@@ -1,3 +1,4 @@
+use anyhow::Context;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -13,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet, fs::OpenOptions, io::Write, path::Path as FsPath, sync::Arc,
+    time::Duration,
+};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tower_http::{
@@ -33,6 +37,96 @@ pub struct AppState {
     pub upstream_token: Option<Arc<String>>,
     pub destination_token: Option<Arc<String>>,
     pub destination_url_override: Option<Arc<String>>,
+}
+
+/// Records whether the HMAC key was explicitly configured or safely recovered
+/// from the local instance's persistent storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SigningKeySource {
+    Supplied,
+    Persisted,
+    Generated,
+}
+
+impl SigningKeySource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Supplied => "supplied",
+            Self::Persisted => "persisted",
+            Self::Generated => "generated",
+        }
+    }
+}
+
+/// Loads an operator-provided key or creates a unique, persistent 256-bit
+/// key for an instance. The generated file contains raw key bytes and is never
+/// returned in logs or API responses.
+pub fn load_or_generate_signing_key(
+    key_path: &FsPath,
+    supplied: Option<&str>,
+) -> anyhow::Result<(Vec<u8>, SigningKeySource)> {
+    if let Some(key) = supplied {
+        validate_signing_key(key.as_bytes())?;
+        return Ok((key.as_bytes().to_vec(), SigningKeySource::Supplied));
+    }
+
+    match std::fs::read(key_path) {
+        Ok(key) => {
+            validate_signing_key(&key)?;
+            return Ok((key, SigningKeySource::Persisted));
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(error)
+                .with_context(|| format!("read signing key at {}", key_path.display()));
+        }
+        Err(_) => {}
+    }
+
+    let parent = key_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("signing key path must have a parent directory"))?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("create signing-key directory {}", parent.display()))?;
+    let mut key = vec![0_u8; 32];
+    getrandom::fill(&mut key).context("generate a signing key")?;
+
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(key_path) {
+        Ok(mut file) => {
+            file.write_all(&key)
+                .with_context(|| format!("write signing key at {}", key_path.display()))?;
+            file.sync_all()
+                .with_context(|| format!("sync signing key at {}", key_path.display()))?;
+            Ok((key, SigningKeySource::Generated))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let persisted = std::fs::read(key_path).with_context(|| {
+                format!(
+                    "read concurrently-created signing key at {}",
+                    key_path.display()
+                )
+            })?;
+            validate_signing_key(&persisted)?;
+            Ok((persisted, SigningKeySource::Persisted))
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("create signing key at {}", key_path.display()))
+        }
+    }
+}
+
+fn validate_signing_key(key: &[u8]) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        key.len() >= 32,
+        "ENVELOPE_SIGNING_KEY must contain at least 32 bytes"
+    );
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,7 +256,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub async fn create_state(database_url: &str) -> anyhow::Result<AppState> {
+pub async fn create_state(database_url: &str, signing_key: Vec<u8>) -> anyhow::Result<AppState> {
     let db = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(database_url)
@@ -175,11 +269,7 @@ pub async fn create_state(database_url: &str) -> anyhow::Result<AppState> {
             .timeout(Duration::from_secs(8))
             .user_agent("alert-evidence-envelope/0.1")
             .build()?,
-        signing_key: Arc::new(
-            std::env::var("ENVELOPE_SIGNING_KEY")
-                .unwrap_or_else(|_| "development-only-change-me".into())
-                .into_bytes(),
-        ),
+        signing_key: Arc::new(signing_key),
         admin_token: std::env::var("ADMIN_TOKEN").ok().map(Arc::new),
         inbound_token: std::env::var("INBOUND_TOKEN").ok().map(Arc::new),
         upstream_token: std::env::var("UPSTREAM_BEARER_TOKEN").ok().map(Arc::new),
@@ -842,6 +932,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn signing_key_is_generated_once_and_can_be_overridden() {
+        let directory = tempfile::tempdir().unwrap();
+        let key_path = directory.path().join("instance.key");
+
+        let (generated, source) = load_or_generate_signing_key(&key_path, None).unwrap();
+        assert_eq!(source, SigningKeySource::Generated);
+        assert_eq!(generated.len(), 32);
+
+        let (persisted, source) = load_or_generate_signing_key(&key_path, None).unwrap();
+        assert_eq!(source, SigningKeySource::Persisted);
+        assert_eq!(persisted, generated);
+
+        let override_key = "a".repeat(32);
+        let (supplied, source) =
+            load_or_generate_signing_key(&key_path, Some(&override_key)).unwrap();
+        assert_eq!(source, SigningKeySource::Supplied);
+        assert_eq!(supplied, override_key.as_bytes());
+        assert_eq!(std::fs::read(key_path).unwrap(), generated);
+    }
+
+    #[test]
+    fn signing_key_rejects_short_values() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(
+            load_or_generate_signing_key(&directory.path().join("key"), Some("too-short")).is_err()
+        );
+    }
+
     #[tokio::test]
     async fn http_routes_complete_a_local_relay_workflow() {
         type Capture =
@@ -867,7 +986,12 @@ mod tests {
 
         let file = tempfile::NamedTempFile::new().unwrap();
         let database_url = format!("sqlite:{}", file.path().display());
-        let state = create_state(&database_url).await.unwrap();
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+        )
+        .await
+        .unwrap();
         let app = api_router(state);
 
         let health = app

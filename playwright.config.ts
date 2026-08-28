@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const testBuildSha = 'test-build-identity';
+process.env.PLAYWRIGHT_EXPECTED_BUILD_SHA = testBuildSha;
+
 export default defineConfig({
   testDir: './tests/browser',
   timeout: 30_000,
@@ -12,7 +15,7 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['iPhone 13'], browserName: 'chromium', viewport: { width: 390, height: 844 } } },
   ],
   webServer: {
-    command: 'PORT=4178 DATABASE_URL=sqlite:data/playwright.db?mode=rwc STATIC_DIR=dist ENVELOPE_SIGNING_KEY=playwright-secret BUILD_SHA=5e9f77e56c4f28e6b1d848d3de611091bce8bb83 cargo run --quiet',
+    command: `PORT=4178 DATABASE_URL=sqlite:data/playwright.db?mode=rwc STATIC_DIR=dist ENVELOPE_SIGNING_KEY=playwright-signing-key-at-least-32-bytes BUILD_SHA=${testBuildSha} cargo run --quiet`,
     url: 'http://127.0.0.1:4178/health',
     reuseExistingServer: true,
     timeout: 120_000,
