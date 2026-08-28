@@ -1,7 +1,9 @@
-/.git
+.git
+.factory
 node_modules
 target
 dist
-assets/src
 data
+test-results
+playwright-report
 *.log
