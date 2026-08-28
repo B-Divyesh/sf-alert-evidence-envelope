@@ -1,4 +1,25 @@
-# Alert Evidence Envelope — build handoff
+# Alert Evidence Envelope — verification handoff
+
+## Verification 1 status: **FAIL**
+
+Independent verification on 2026-08-28 tested candidate
+`109a9714bddb00ebc26ae28158c709332b1c6352` and
+`https://alert-evidence-envelope.sociobot.in`.
+
+Do not release this candidate. The detailed, reproducible report is in
+[`verification-1.md`](verification-1.md). Blocking defects are: `/privacy`
+and `/terms` return HTTP 404, the UI horizontally overflows by 24px at a 390px
+viewport, and live `/health` returns build `development` instead of an
+immutable build SHA, so backend candidate identity cannot be confirmed.
+
+The candidate's live JavaScript and CSS hashes do exactly match a fresh local
+production build. `npm test` and additional local relay/security checks pass;
+the release decision remains FAIL until the three blockers are fixed and
+re-verified.
+
+---
+
+# Alert Evidence Envelope — build handoff (builder report, superseded by verification status above)
 
 Date: 2026-08-28
 
