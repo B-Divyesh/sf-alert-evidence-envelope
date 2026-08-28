@@ -244,10 +244,18 @@ async fn seed_default(db: &SqlitePool) -> anyhow::Result<()> {
     Ok(())
 }
 
+const DEVELOPMENT_BUILD_ID: &str = "development";
+
+fn build_identity(compiled_identity: Option<&'static str>) -> &'static str {
+    compiled_identity
+        .filter(|identity| !identity.trim().is_empty())
+        .unwrap_or(DEVELOPMENT_BUILD_ID)
+}
+
 async fn health() -> Json<Value> {
     Json(json!({
         "status": "ok",
-        "build": option_env!("BUILD_SHA").unwrap_or("development")
+        "build": build_identity(option_env!("BUILD_SHA"))
     }))
 }
 
@@ -821,6 +829,17 @@ mod tests {
         assert_eq!(output.evidence_items, 0);
         assert!(output.truncated);
         assert!(output.evidence_bytes <= 1024);
+    }
+
+    #[test]
+    fn build_identity_never_exposes_an_empty_compile_time_value() {
+        assert_eq!(build_identity(None), DEVELOPMENT_BUILD_ID);
+        assert_eq!(build_identity(Some("")), DEVELOPMENT_BUILD_ID);
+        assert_eq!(build_identity(Some("   \t")), DEVELOPMENT_BUILD_ID);
+        assert_eq!(
+            build_identity(Some("0123456789abcdef0123456789abcdef01234567")),
+            "0123456789abcdef0123456789abcdef01234567"
+        );
     }
 
     #[tokio::test]

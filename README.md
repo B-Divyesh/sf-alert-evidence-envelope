@@ -98,7 +98,7 @@ docker run --read-only --tmpfs /tmp -p 8080:8080 \
   alert-evidence-envelope
 ```
 
-The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. `BUILD_SHA` is required at image build time and is compiled into `/health` as `build`; pass the immutable 40-character commit with `--build-arg BUILD_SHA=<commit>`. The factory owns production deployment, DNS, TLS, and billing registration.
+The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. Pass the immutable 40-character commit with `--build-arg BUILD_SHA=<commit>`; it is compiled into `/health` as `build` and recorded in the image revision label. A local build without that argument reports the explicit `development` identity—never an empty value. The factory owns production deployment, DNS, TLS, and billing registration.
 
 ## Paid Field Kit
 
