@@ -6,14 +6,12 @@ COPY frontend ./frontend
 RUN npm run build
 
 FROM rust:1.98-alpine AS backend
-RUN apk add --no-cache git musl-dev
+RUN apk add --no-cache musl-dev
 WORKDIR /app
 ARG BUILD_SHA
-COPY .git ./.git
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
-RUN BUILD_SHA="${BUILD_SHA:-$(git rev-parse --verify HEAD)}"; \
-    test -n "$BUILD_SHA"; \
+RUN test -n "$BUILD_SHA"; \
     BUILD_SHA="$BUILD_SHA" cargo build --release --locked
 
 FROM alpine:3.21

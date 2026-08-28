@@ -91,14 +91,14 @@ This is a 100+ requests/second health-route smoke on ordinary development hardwa
 ## Container deployment
 
 ```sh
-docker build -t alert-evidence-envelope .
+docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t alert-evidence-envelope .
 docker run --read-only --tmpfs /tmp -p 8080:8080 \
   -v envelope-data:/data \
   -e ENVELOPE_SIGNING_KEY='replace-me' \
   alert-evidence-envelope
 ```
 
-The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. It compiles the checked-out Git commit into `/health` as `build`; optionally pass `--build-arg BUILD_SHA=<40-character-commit>` when building an exported source tree without Git metadata. The factory owns production deployment, DNS, TLS, and billing registration.
+The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. `BUILD_SHA` is required at image build time and is compiled into `/health` as `build`; pass the immutable 40-character commit with `--build-arg BUILD_SHA=<commit>`. The factory owns production deployment, DNS, TLS, and billing registration.
 
 ## Paid Field Kit
 

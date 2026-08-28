@@ -15,11 +15,10 @@ checked-out final `HEAD` with the container work order.
   still return the SPA fallback with HTTP 404.
 - The Field Kit now uses shrinkable grid tracks and a bounded responsive gap,
   so a 390px viewport cannot be widened by the policy card.
-- The container compiler receives an immutable `BUILD_SHA`: it uses an explicit
-  Docker build argument when supplied, otherwise derives the checked-out Git
-  commit from the build context. `/health` therefore reports the compiled
-  identity rather than `development`. `.git` exists only in the intermediate
-  Rust build stage and is absent from the final non-root runtime image.
+- The container compiler requires an immutable `BUILD_SHA` Docker build
+  argument. `/health` therefore reports the compiled identity rather than
+  `development`; the image build fails rather than silently shipping an
+  unidentifiable backend when the argument is omitted.
 - The previous four Clippy test-code warnings are resolved, so strict linting
   is warning-free.
 
@@ -71,16 +70,19 @@ On 2026-08-28, from a clean `npm ci`:
 npm ci
 npm test
 cargo clippy --all-targets --locked -- -D warnings
-docker build -t alert-evidence-envelope .
+docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t alert-evidence-envelope .
 ```
 
-The Dockerfile derives the final Git SHA automatically when `.git` is in the
-build context. For an exported source tree, provide
-`--build-arg BUILD_SHA=$(git rev-parse HEAD)`. The factory deployment command
-is:
+The factory ACR source context omits `.git`, so prebuild the immutable image
+with its exact commit and pass that image to the deployment helper:
 
 ```sh
-/opt/fleet/lib/deploy-container.sh alert-evidence-envelope /work/repo Dockerfile 8080
+sha=$(git -C /work/repo rev-parse HEAD)
+az acr build --registry sociobotregistry \
+  --image "sf-alert-evidence-envelope:${sha:0:12}" \
+  --file /work/repo/Dockerfile --build-arg BUILD_SHA="$sha" /work/repo
+/opt/fleet/lib/deploy-container.sh alert-evidence-envelope /work/repo Dockerfile 8080 \
+  "sociobotregistry.azurecr.io/sf-alert-evidence-envelope:${sha:0:12}"
 ```
 
 After deployment, verify that `https://alert-evidence-envelope.sociobot.in/health`
