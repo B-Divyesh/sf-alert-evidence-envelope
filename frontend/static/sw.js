@@ -1,4 +1,4 @@
-const CACHE = 'envelope-shell-v3';
+const CACHE = 'envelope-shell-v4';
 const SHELL = ['/', '/demo', '/privacy', '/terms', '/404.html', '/legal.css', '/build.js', '/favicon.svg', '/apple-touch-icon.png', '/fonts/inter-latin.woff2', '/fonts/fraunces-latin.woff2', '/assets/evidence-terrain-960.webp'];
 
 self.addEventListener('install', (event) => {

@@ -35,7 +35,7 @@
   <p>The relay reads configured secrets from its environment or protected files on the server.</p>
   <p>Source and destination URLs may be stored in SQLite. License tokens and paid presets remain in your browser.</p>
   <h2>How the demo is separated</h2>
-  <p>Demo workspaces live in server memory for up to 24 hours. They cannot read or change the protected route.</p>
+  <p>SQLite stores each demo session ID and expiry time for up to 24 hours. It never stores the sample alert or envelope.</p>
   <h2>Network requests</h2>
   <p>The relay contacts only endpoints configured by its operator.</p>
   <p>License verification contacts Sociobot when a license is present. The browser checks at most once each day.</p>

@@ -17,7 +17,7 @@ The relay does not evaluate alerts, manage incidents, retain raw payloads, or su
 5. It adds a query fingerprint and HMAC-SHA256 signature.
 6. It forwards supported provider signatures as `x-original-provider-signature`.
 
-SQLite stores route settings and the latest 20 delivery metadata rows. It does not store inbound bodies or evidence excerpts.
+SQLite stores route settings, expiring demo session IDs, and the latest 20 delivery metadata rows. It does not store inbound bodies or evidence excerpts.
 
 ## Run locally
 
@@ -54,8 +54,8 @@ With no destination, the relay returns the signed envelope and records delivery 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP listener |
-| `DATABASE_URL` | `sqlite:data/envelopes.db?mode=rwc` | Live metadata and route database |
-| `DATABASE_SNAPSHOT_FILE` | unset | Durable snapshot path for mounted storage |
+| `DATA_DIR` | `/data` when present, otherwise `data` | Durable database, key, and token directory |
+| `DATABASE_URL` | `<DATA_DIR>/envelopes.db` | Durable session, metadata, and route database |
 | `STATIC_DIR` | `dist` | Built frontend directory |
 | `ENVELOPE_SIGNING_KEY` | generated | Optional HMAC key override of at least 32 bytes |
 | `SIGNING_KEY_FILE` | `data/envelope-signing.key` | Persisted generated signing key |
@@ -103,7 +103,9 @@ npm run verify:live-topology
 
 The deployment command builds in the factory registry. It then mounts a product-specific Azure File share at `/data`, selects single-revision mode, and fixes scaling at one replica.
 
-One replica prevents SQLite state and in-process rate limits from splitting across workers. The container runs SQLite on its local filesystem and atomically snapshots each committed change to the mounted share. This avoids SQLite locking on SMB while retaining settings and metadata across revisions. The share also retains signing identity and access tokens.
+The work order sets `deploy.data_dir=/data`. The container stores SQLite, signing identity, and access tokens directly on that durable mount.
+
+The deployment fixes scaling at one replica. Route settings and demo sessions therefore remain consistent across fresh HTTP connections and revision restarts.
 
 The image runs as the non-root `envelope` user. It starts with only `PORT` supplied by the platform.
 

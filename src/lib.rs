@@ -18,17 +18,11 @@ use sqlx::{
     Row, SqlitePool,
 };
 use std::{
-    collections::{HashMap, HashSet},
-    fs::OpenOptions,
-    io::Write,
-    path::{Path as FsPath, PathBuf},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
+    collections::HashSet, fs::OpenOptions, io::Write, path::Path as FsPath, str::FromStr,
+    sync::Arc, time::Duration,
 };
 use subtle::ConstantTimeEq;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 use tower_http::{
     compression::CompressionLayer, limit::RequestBodyLimitLayer,
     set_header::SetResponseHeaderLayer, trace::TraceLayer,
@@ -46,15 +40,7 @@ pub struct AppState {
     pub upstream_token: Option<Arc<String>>,
     pub destination_token: Option<Arc<String>>,
     pub destination_url_override: Option<Arc<String>>,
-    demo_sessions: Arc<tokio::sync::RwLock<HashMap<String, chrono::DateTime<Utc>>>>,
-    snapshot: Option<Arc<SnapshotPaths>>,
     persistence_lock: Arc<tokio::sync::Mutex<()>>,
-}
-
-#[derive(Debug)]
-struct SnapshotPaths {
-    database: PathBuf,
-    durable: PathBuf,
 }
 
 /// Loads an operator token or generates a persistent 256-bit hexadecimal token.
@@ -353,23 +339,8 @@ pub async fn create_state(
     admin_token: String,
     inbound_token: String,
 ) -> anyhow::Result<AppState> {
-    create_state_with_snapshot(database_url, signing_key, admin_token, inbound_token, None).await
-}
-
-pub async fn create_state_with_snapshot(
-    database_url: &str,
-    signing_key: Vec<u8>,
-    admin_token: String,
-    inbound_token: String,
-    snapshot: Option<(PathBuf, PathBuf)>,
-) -> anyhow::Result<AppState> {
-    let snapshot = snapshot.map(|(database, durable)| SnapshotPaths { database, durable });
-    if let Some(paths) = &snapshot {
-        restore_database_snapshot(paths).await?;
-    }
-    // Azure Files is an SMB filesystem. A single SQLite connection avoids
-    // cross-connection contention. In production the live database remains
-    // local and committed copies are written to the mounted durable share.
+    // Production uses one replica and one SQLite connection on its durable
+    // /data mount, so committed channel and demo-session rows survive restarts.
     let options = SqliteConnectOptions::from_str(database_url)?
         .journal_mode(SqliteJournalMode::Delete)
         .busy_timeout(Duration::from_secs(30));
@@ -391,67 +362,9 @@ pub async fn create_state_with_snapshot(
         upstream_token: std::env::var("UPSTREAM_BEARER_TOKEN").ok().map(Arc::new),
         destination_token: std::env::var("DESTINATION_BEARER_TOKEN").ok().map(Arc::new),
         destination_url_override: std::env::var("DESTINATION_URL").ok().map(Arc::new),
-        demo_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        snapshot: snapshot.map(Arc::new),
         persistence_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
-    persist_database_snapshot(&state).await?;
     Ok(state)
-}
-
-async fn restore_database_snapshot(paths: &SnapshotPaths) -> anyhow::Result<()> {
-    if !paths.durable.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = paths.database.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    for suffix in ["-journal", "-wal", "-shm"] {
-        let stale = PathBuf::from(format!("{}{}", paths.database.display(), suffix));
-        let _ = tokio::fs::remove_file(stale).await;
-    }
-    let contents = tokio::fs::read(&paths.durable)
-        .await
-        .with_context(|| format!("read SQLite snapshot {}", paths.durable.display()))?;
-    let mut database = tokio::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&paths.database)
-        .await
-        .with_context(|| format!("open restored database {}", paths.database.display()))?;
-    database.write_all(&contents).await?;
-    database.sync_all().await?;
-    Ok(())
-}
-
-async fn persist_database_snapshot(state: &AppState) -> anyhow::Result<()> {
-    let Some(paths) = &state.snapshot else {
-        return Ok(());
-    };
-    let parent = paths
-        .durable
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("snapshot path must have a parent directory"))?;
-    tokio::fs::create_dir_all(parent).await?;
-    let temporary = paths.durable.with_extension("db.next");
-    let contents = tokio::fs::read(&paths.database)
-        .await
-        .with_context(|| format!("read SQLite database {}", paths.database.display()))?;
-    let mut temporary_file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temporary)
-        .await
-        .with_context(|| format!("open durable snapshot {}", temporary.display()))?;
-    temporary_file.write_all(&contents).await?;
-    temporary_file.sync_all().await?;
-    drop(temporary_file);
-    tokio::fs::rename(&temporary, &paths.durable)
-        .await
-        .with_context(|| format!("publish durable snapshot {}", paths.durable.display()))?;
-    Ok(())
 }
 
 pub fn api_router(state: AppState) -> Router {
@@ -500,6 +413,13 @@ async fn migrate(db: &SqlitePool) -> anyhow::Result<()> {
             id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, service TEXT NOT NULL,
             status TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
             evidence_items INTEGER NOT NULL, evidence_bytes INTEGER NOT NULL
+         )",
+    )
+    .execute(db)
+    .await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS demo_sessions (
+            id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL
          )",
     )
     .execute(db)
@@ -578,9 +498,6 @@ async fn put_config(
         .execute(&state.db)
         .await
         .map_err(|e| ApiError::Internal(e.into()))?;
-    persist_database_snapshot(&state)
-        .await
-        .map_err(ApiError::Internal)?;
     Ok(Json(config))
 }
 
@@ -706,25 +623,37 @@ async fn preview(
     )?))
 }
 
-async fn create_demo_session(State(state): State<AppState>) -> Json<DemoSession> {
+async fn create_demo_session(State(state): State<AppState>) -> Result<Json<DemoSession>, ApiError> {
     let now = Utc::now();
     let expires_at = now + chrono::Duration::hours(24);
     let id = Uuid::new_v4().to_string();
-    let mut sessions = state.demo_sessions.write().await;
-    sessions.retain(|_, expiry| *expiry > now);
-    sessions.insert(id.clone(), expires_at);
-    Json(DemoSession {
+    sqlx::query("DELETE FROM demo_sessions WHERE expires_at <= ?")
+        .bind(now.timestamp())
+        .execute(&state.db)
+        .await
+        .map_err(|error| ApiError::Internal(error.into()))?;
+    sqlx::query("INSERT INTO demo_sessions (id, expires_at) VALUES (?, ?)")
+        .bind(&id)
+        .bind(expires_at.timestamp())
+        .execute(&state.db)
+        .await
+        .map_err(|error| ApiError::Internal(error.into()))?;
+    Ok(Json(DemoSession {
         id,
         expires_at: expires_at.to_rfc3339(),
-    })
+    }))
 }
 
 async fn delete_demo_session(
     State(state): State<AppState>,
     Path(session): Path<String>,
-) -> StatusCode {
-    state.demo_sessions.write().await.remove(&session);
-    StatusCode::NO_CONTENT
+) -> Result<StatusCode, ApiError> {
+    sqlx::query("DELETE FROM demo_sessions WHERE id = ?")
+        .bind(session)
+        .execute(&state.db)
+        .await
+        .map_err(|error| ApiError::Internal(error.into()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn demo_preview(
@@ -733,12 +662,20 @@ async fn demo_preview(
     body: Bytes,
 ) -> Result<Json<EvidenceEnvelope>, ApiError> {
     let now = Utc::now();
-    let mut sessions = state.demo_sessions.write().await;
-    sessions.retain(|_, expiry| *expiry > now);
-    if !sessions.contains_key(&session) {
+    sqlx::query("DELETE FROM demo_sessions WHERE expires_at <= ?")
+        .bind(now.timestamp())
+        .execute(&state.db)
+        .await
+        .map_err(|error| ApiError::Internal(error.into()))?;
+    let session_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM demo_sessions WHERE id = ?)")
+            .bind(&session)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| ApiError::Internal(error.into()))?;
+    if !session_exists {
         return Err(ApiError::NotFound);
     }
-    drop(sessions);
     let request: PreviewRequest = serde_json::from_slice(&body)
         .map_err(|_| ApiError::BadRequest("request body must be valid preview JSON".into()))?;
     let mut config = ChannelConfig::default();
@@ -852,6 +789,7 @@ async fn fetch_evidence(
     let mut url = Url::parse(config.source_url.as_deref().unwrap())
         .map_err(|e| ApiError::Upstream(e.to_string()))?;
     let query = scalar_at(alert, &config.query_pointer).unwrap_or_default();
+    url.set_query(None);
     url.query_pairs_mut()
         .append_pair("q", &query)
         .append_pair("limit", &config.max_items.to_string());
@@ -1120,9 +1058,6 @@ async fn record_delivery(
         .execute(&state.db)
         .await
         .map_err(|e| ApiError::Internal(e.into()))?;
-    persist_database_snapshot(state)
-        .await
-        .map_err(ApiError::Internal)?;
     Ok(())
 }
 
@@ -1138,6 +1073,7 @@ mod tests {
     #[test]
     fn recursively_redacts_and_bounds_evidence() {
         // @claim:bounded-redacted-signed
+        let signing_key = b"test-key";
         let alert = json!({"service":"checkout", "error":"card declined", "startsAt":"2026-08-27T12:00:00Z", "query":"service=checkout"});
         let evidence = vec![
             json!({"message":"failed", "user":{"email":"a@example.com"}, "token":"secret"}),
@@ -1147,14 +1083,39 @@ mod tests {
             max_items: 1,
             ..Default::default()
         };
-        let output = build_envelope(&alert, evidence, &config, b"test-key", true).unwrap();
+        let output = build_envelope(&alert, evidence, &config, signing_key, true).unwrap();
         assert_eq!(output.summary.service, "checkout");
         assert_eq!(output.evidence_items, 1);
         assert!(output.truncated);
         assert_eq!(output.evidence[0]["user"]["email"], "[REDACTED]");
         assert_eq!(output.evidence[0]["token"], "[REDACTED]");
-        assert!(output.signature.starts_with("hmac-sha256="));
+        let signature = hex::decode(
+            output
+                .signature
+                .strip_prefix("hmac-sha256=")
+                .expect("signature scheme"),
+        )
+        .unwrap();
+        let mut unsigned = output.clone();
+        unsigned.signature.clear();
+        let mut mac = Hmac::<Sha256>::new_from_slice(signing_key).unwrap();
+        mac.update(&serde_json::to_vec(&unsigned).unwrap());
+        mac.verify_slice(&signature).expect("HMAC must verify");
         assert!(output.source_signature_preserved);
+
+        let byte_limited = build_envelope(
+            &alert,
+            vec![json!({"message": "x".repeat(2_000)})],
+            &ChannelConfig {
+                max_bytes: 1_024,
+                ..Default::default()
+            },
+            signing_key,
+            false,
+        )
+        .unwrap();
+        assert!(byte_limited.truncated);
+        assert!(byte_limited.evidence_bytes <= 1_024);
     }
 
     #[test]
@@ -1241,6 +1202,106 @@ mod tests {
         assert!(
             load_or_generate_signing_key(&directory.path().join("key"), Some("too-short")).is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn configured_source_receives_only_the_alert_query_and_fixed_limit() {
+        // @claim:fixed-query-source
+        type Capture =
+            Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<axum::http::Uri>>>>;
+        async fn source(State(capture): State<Capture>, uri: axum::http::Uri) -> Json<Value> {
+            if let Some(sender) = capture.lock().await.take() {
+                let _ = sender.send(uri);
+            }
+            Json(json!({"data": [{"message": "database timeout"}]}))
+        }
+
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let capture: Capture = Arc::new(tokio::sync::Mutex::new(Some(sender)));
+        let source_app = Router::new()
+            .route("/evidence", get(source))
+            .with_state(capture);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source_url = format!(
+            "http://{}/evidence?configured=discarded",
+            listener.local_addr().unwrap()
+        );
+        let source_task = tokio::spawn(async move {
+            axum::serve(listener, source_app).await.unwrap();
+        });
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite:{}", file.path().display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state.clone());
+        let config = ChannelConfig {
+            source_url: Some(source_url),
+            max_items: 2,
+            ..Default::default()
+        };
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/config")
+                    .header("content-type", "application/json")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
+                    .body(Body::from(serde_json::to_vec(&config).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let alert = json!({
+            "service": "orders-api",
+            "error": "database timeout",
+            "startsAt": "2026-08-30T05:05:00Z",
+            "query": "service=orders-api level=error",
+            "source_url": "http://127.0.0.1:1/alert-controlled"
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/relay/primary")
+                    .header("content-type", "application/json")
+                    .header(
+                        "x-envelope-token",
+                        "test-inbound-token-with-at-least-32-characters",
+                    )
+                    .body(Body::from(alert.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let uri = tokio::time::timeout(Duration::from_secs(2), receiver)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(uri.path(), "/evidence");
+        let query: std::collections::HashMap<String, String> =
+            url::form_urlencoded::parse(uri.query().unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        assert_eq!(query.len(), 2);
+        assert_eq!(query.get("q").unwrap(), "service=orders-api level=error");
+        assert_eq!(query.get("limit").unwrap(), "2");
+
+        source_task.abort();
     }
 
     #[tokio::test]
@@ -1381,12 +1442,26 @@ mod tests {
                 .unwrap(),
             "provider-sig"
         );
-        assert!(forwarded_headers
+        let forwarded_signature = forwarded_headers
             .get("x-evidence-envelope-signature")
             .unwrap()
             .to_str()
-            .unwrap()
-            .starts_with("hmac-sha256="));
+            .unwrap();
+        let mut forwarded_envelope: EvidenceEnvelope = serde_json::from_value(forwarded).unwrap();
+        assert_eq!(forwarded_signature, forwarded_envelope.signature);
+        let signature = hex::decode(
+            forwarded_envelope
+                .signature
+                .strip_prefix("hmac-sha256=")
+                .unwrap(),
+        )
+        .unwrap();
+        forwarded_envelope.signature.clear();
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(b"test-signing-key-with-at-least-32-bytes").unwrap();
+        mac.update(&serde_json::to_vec(&forwarded_envelope).unwrap());
+        mac.verify_slice(&signature)
+            .expect("forwarded envelope HMAC must verify");
 
         let history = app
             .clone()
@@ -1453,6 +1528,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn demo_create_then_preview_survives_a_fresh_database_connection() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("demo-sessions.db");
+        let database_url = format!("sqlite:{}?mode=rwc", database_path.display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/demo/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 10_000).await.unwrap();
+        let session: Value = serde_json::from_slice(&body).unwrap();
+        let session_id = session["id"].as_str().unwrap();
+        state.db.close().await;
+
+        let fresh_state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let response = api_router(fresh_state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/demo/sessions/{session_id}/preview"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "alert": {
+                                "service": "checkout-api",
+                                "error": "payment authorization timed out",
+                                "startsAt": "2026-08-27T14:32:08Z",
+                                "evidence": [{"email": "customer@example.com"}]
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn demo_session_is_ephemeral_and_cannot_reach_real_history() {
         // @claim:isolated-demo
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -1465,7 +1603,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let app = api_router(state);
+        let app = api_router(state.clone());
+        let created_after = Utc::now();
         let session = app
             .clone()
             .oneshot(
@@ -1481,6 +1620,21 @@ mod tests {
         let bytes = to_bytes(session.into_body(), 10_000).await.unwrap();
         let session: Value = serde_json::from_slice(&bytes).unwrap();
         let id = session["id"].as_str().unwrap();
+        let expires_at =
+            chrono::DateTime::parse_from_rfc3339(session["expires_at"].as_str().unwrap())
+                .unwrap()
+                .with_timezone(&Utc);
+        let lifetime = expires_at
+            .signed_duration_since(created_after)
+            .num_seconds();
+        assert!((86_399..=86_400).contains(&lifetime));
+        let stored_expiry: i64 =
+            sqlx::query_scalar("SELECT expires_at FROM demo_sessions WHERE id = ?")
+                .bind(id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
+        assert_eq!(stored_expiry, expires_at.timestamp());
 
         let sample = json!({
             "alert": {
@@ -1507,6 +1661,33 @@ mod tests {
         let preview: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(preview["summary"]["service"], "checkout-api");
         assert_eq!(preview["evidence"][0]["email"], "[REDACTED]");
+
+        sqlx::query("INSERT INTO demo_sessions (id, expires_at) VALUES (?, ?)")
+            .bind("expired-session")
+            .bind(Utc::now().timestamp() - 1)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        let expired = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/demo/sessions/expired-session/preview")
+                    .header("content-type", "application/json")
+                    .body(Body::from(sample.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(expired.status(), StatusCode::NOT_FOUND);
+        let expired_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM demo_sessions WHERE id = ?")
+                .bind("expired-session")
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
+        assert_eq!(expired_rows, 0);
 
         let history = app
             .oneshot(
@@ -1620,20 +1801,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn durable_snapshot_restores_committed_route_state() {
+    async fn durable_sqlite_restores_committed_route_state() {
         let directory = tempfile::tempdir().unwrap();
-        let database = directory.path().join("runtime.db");
-        let durable = directory
-            .path()
-            .join("mounted")
-            .join("envelopes.snapshot.db");
+        let database = directory.path().join("mounted").join("envelopes.db");
+        std::fs::create_dir_all(database.parent().unwrap()).unwrap();
         let database_url = format!("sqlite:{}?mode=rwc", database.display());
-        let state = create_state_with_snapshot(
+        let state = create_state(
             &database_url,
             b"test-signing-key-with-at-least-32-bytes".to_vec(),
             "test-admin-token-with-at-least-32-characters".into(),
             "test-inbound-token-with-at-least-32-characters".into(),
-            Some((database.clone(), durable.clone())),
         )
         .await
         .unwrap();
@@ -1657,16 +1834,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        assert!(std::fs::metadata(&durable).unwrap().len() > 0);
+        assert!(std::fs::metadata(&database).unwrap().len() > 0);
         state.db.close().await;
-        std::fs::remove_file(&database).unwrap();
 
-        let restored = create_state_with_snapshot(
+        let restored = create_state(
             &database_url,
             b"test-signing-key-with-at-least-32-bytes".to_vec(),
             "test-admin-token-with-at-least-32-characters".into(),
             "test-inbound-token-with-at-least-32-characters".into(),
-            Some((database, durable)),
         )
         .await
         .unwrap();

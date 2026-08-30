@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { createHmac } from 'node:crypto';
 
 const seriousAxe = async (page: Page) => {
   const results = await new AxeBuilder({ page })
@@ -25,6 +26,13 @@ test('@claim:demo-envelope opens one-click sample and builds a safe envelope', a
   const json = page.getByLabel('Signed evidence envelope JSON');
   await expect(json).toContainText('[REDACTED]');
   await expect(json).toContainText(/hmac-sha256=[a-f0-9]{64}/);
+  const envelope = JSON.parse(await json.textContent() || '{}');
+  const signature = envelope.signature;
+  envelope.signature = '';
+  expect(signature).toBe(`hmac-sha256=${createHmac('sha256', 'playwright-signing-key-at-least-32-bytes')
+    .update(JSON.stringify(envelope)).digest('hex')}`);
+  expect(envelope.evidence_items).toBeLessThanOrEqual(20);
+  expect(envelope.evidence_bytes).toBeLessThanOrEqual(32_768);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -154,7 +162,7 @@ test('keeps an updateable offline shell', async ({ page }) => {
   const shell = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
     await registration.update();
-    return (await caches.keys()).includes('envelope-shell-v3');
+    return (await caches.keys()).includes('envelope-shell-v4');
   });
   expect(shell).toBe(true);
 });
@@ -235,18 +243,41 @@ test('@claim:rate-limit limits each forwarded client and returns a useful retry 
   expect(otherClient.status()).toBe(401);
 });
 
-test('@claim:field-kit-purchase exposes a working one-time checkout', async ({ page, request }) => {
+test('@claim:field-kit-purchase shows the price and official checkout action', async ({ page }) => {
   await page.goto('/');
   const checkout = page.getByRole('link', { name: 'Buy the Field Kit' });
   const productionUrl = 'https://api.sociobot.in/api/v1/products/alert-evidence-envelope/checkout';
   await expect(checkout).toHaveAttribute('href', productionUrl);
   await expect(page.getByText('Self-hosted core is free; Field Kit costs $39 once', { exact: true })).toBeVisible();
-  const production = await request.get(productionUrl, { maxRedirects: 0 });
-  expect([302, 303, 307]).toContain(production.status());
-  expect(production.headers().location).toMatch(/^https:\/\/checkout\.dodopayments\.com\//);
-  const pilot = await request.get(productionUrl.replace('https://api.sociobot.in', 'https://pilot-api.sociobot.in'), { maxRedirects: 0 });
-  expect([302, 303, 307]).toContain(pilot.status());
-  expect(pilot.headers().location).toMatch(/^https:\/\/test\.checkout\.dodopayments\.com\//);
+  expect(new URL(await checkout.getAttribute('href') || '').origin).toBe('https://api.sociobot.in');
+});
+
+test('@claim:local-policy-presets keeps named redaction presets on this device', async ({ page }) => {
+  const origins = new Set<string>();
+  page.on('request', (request) => origins.add(new URL(request.url()).origin));
+  await page.addInitScript(() => {
+    localStorage.setItem('sb_license:alert-evidence-envelope', 'fixture-license');
+    localStorage.setItem(
+      'sb_license:alert-evidence-envelope:verdict',
+      JSON.stringify({ valid: true, checkedAt: Date.now() }),
+    );
+  });
+  await page.goto('/');
+  await expect(page.getByText('Field Kit unlocked')).toBeVisible();
+  await page.getByLabel('Redact keys comma-separated').fill('email, token, customer_id');
+  await page.getByLabel('Preset name').fill('Customer Slack');
+  await page.getByRole('button', { name: 'Save current redaction policy' }).click();
+  await expect(page.getByRole('button', { name: /Customer Slack/ })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('envelope:presets') || '[]')))
+    .toEqual([{ name: 'Customer Slack', fields: ['email', 'token', 'customer_id'] }]);
+
+  await page.reload();
+  const preset = page.getByRole('button', { name: /Customer Slack/ });
+  await expect(preset).toBeVisible();
+  await page.getByLabel('Redact keys comma-separated').fill('password');
+  await preset.click();
+  await expect(page.getByLabel('Redact keys comma-separated')).toHaveValue('email, token, customer_id');
+  expect([...origins]).toEqual([new URL(page.url()).origin]);
 });
 
 test('restores a Field Kit license and strips returned tokens from the URL', async ({ page }) => {

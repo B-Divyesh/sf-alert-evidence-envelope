@@ -1,6 +1,5 @@
 use alert_evidence_envelope::{
-    api_router, create_state_with_snapshot, health, load_or_generate_signing_key,
-    load_or_generate_token,
+    api_router, create_state, health, load_or_generate_signing_key, load_or_generate_token,
 };
 use anyhow::Context;
 use axum::{
@@ -35,13 +34,39 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer().json())
         .init();
 
-    let database_url =
-        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:data/envelopes.db?mode=rwc".into());
-    if database_url.starts_with("sqlite:data/") {
-        std::fs::create_dir_all("data")?;
+    let data_dir = env::var("DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| {
+        if std::path::Path::new("/data").is_dir() {
+            PathBuf::from("/data")
+        } else {
+            PathBuf::from("data")
+        }
+    });
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        format!(
+            "sqlite:{}?mode=rwc",
+            data_dir.join("envelopes.db").display()
+        )
+    });
+    if let Ok(database_path) = sqlite_file_path(&database_url) {
+        if let Some(parent) = database_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let legacy_snapshot = data_dir.join("envelopes.snapshot.db");
+        if restore_legacy_snapshot_once(&database_path, &legacy_snapshot)? {
+            info!("migrated legacy SQLite snapshot to the durable database");
+        }
     }
-    let signing_key_path =
-        env::var("SIGNING_KEY_FILE").unwrap_or_else(|_| "data/envelope-signing.key".into());
+    info!(
+        database_source = if env::var_os("DATABASE_URL").is_some() {
+            "supplied"
+        } else {
+            "generated default"
+        },
+        data_dir = %data_dir.display(),
+        "runtime database configured"
+    );
+    let signing_key_path = env::var("SIGNING_KEY_FILE")
+        .unwrap_or_else(|_| data_dir.join("envelope-signing.key").display().to_string());
     let supplied_signing_key = env::var("ENVELOPE_SIGNING_KEY").ok();
     let (signing_key, signing_key_source) = load_or_generate_signing_key(
         std::path::Path::new(&signing_key_path),
@@ -51,8 +76,8 @@ async fn main() -> anyhow::Result<()> {
         signing_key_source = signing_key_source.label(),
         "runtime signing key configured"
     );
-    let admin_token_path =
-        env::var("ADMIN_TOKEN_FILE").unwrap_or_else(|_| "data/admin.token".into());
+    let admin_token_path = env::var("ADMIN_TOKEN_FILE")
+        .unwrap_or_else(|_| data_dir.join("admin.token").display().to_string());
     let (admin_token, admin_token_source) = load_or_generate_token(
         std::path::Path::new(&admin_token_path),
         env::var("ADMIN_TOKEN").ok().as_deref(),
@@ -61,8 +86,8 @@ async fn main() -> anyhow::Result<()> {
         admin_token_source = admin_token_source.label(),
         admin_token_path, "admin access configured"
     );
-    let inbound_token_path =
-        env::var("INBOUND_TOKEN_FILE").unwrap_or_else(|_| "data/inbound.token".into());
+    let inbound_token_path = env::var("INBOUND_TOKEN_FILE")
+        .unwrap_or_else(|_| data_dir.join("inbound.token").display().to_string());
     let (inbound_token, inbound_token_source) = load_or_generate_token(
         std::path::Path::new(&inbound_token_path),
         env::var("INBOUND_TOKEN").ok().as_deref(),
@@ -71,18 +96,7 @@ async fn main() -> anyhow::Result<()> {
         inbound_token_source = inbound_token_source.label(),
         inbound_token_path, "inbound relay access configured"
     );
-    let snapshot = env::var("DATABASE_SNAPSHOT_FILE")
-        .ok()
-        .map(|durable| sqlite_file_path(&database_url).map(|database| (database, durable.into())))
-        .transpose()?;
-    let state = create_state_with_snapshot(
-        &database_url,
-        signing_key,
-        admin_token,
-        inbound_token,
-        snapshot,
-    )
-    .await?;
+    let state = create_state(&database_url, signing_key, admin_token, inbound_token).await?;
     let static_dir = env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let index = format!("{static_dir}/index.html");
     let governor = GovernorConfigBuilder::default()
@@ -153,8 +167,25 @@ fn sqlite_file_path(database_url: &str) -> anyhow::Result<PathBuf> {
         .strip_prefix("sqlite:")
         .and_then(|value| value.split('?').next())
         .filter(|value| !value.is_empty() && *value != ":memory:")
-        .context("DATABASE_SNAPSHOT_FILE requires a file-backed sqlite DATABASE_URL")?;
+        .context("DATABASE_URL must use a file-backed SQLite path")?;
     Ok(PathBuf::from(path))
+}
+
+fn restore_legacy_snapshot_once(
+    database: &std::path::Path,
+    legacy: &std::path::Path,
+) -> anyhow::Result<bool> {
+    if database.exists() || !legacy.exists() || database == legacy {
+        return Ok(false);
+    }
+    std::fs::copy(legacy, database).with_context(|| {
+        format!(
+            "migrate legacy SQLite snapshot {} to {}",
+            legacy.display(),
+            database.display()
+        )
+    })?;
+    Ok(true)
 }
 
 async fn not_found() -> impl IntoResponse {
@@ -193,4 +224,23 @@ async fn shutdown() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
     tokio::select! { _ = ctrl_c => {}, _ = terminate => {} }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::restore_legacy_snapshot_once;
+
+    #[test]
+    fn legacy_snapshot_is_migrated_only_when_the_database_is_absent() {
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = directory.path().join("envelopes.snapshot.db");
+        let database = directory.path().join("envelopes.db");
+        std::fs::write(&legacy, b"legacy database").unwrap();
+
+        assert!(restore_legacy_snapshot_once(&database, &legacy).unwrap());
+        assert_eq!(std::fs::read(&database).unwrap(), b"legacy database");
+        std::fs::write(&legacy, b"new snapshot").unwrap();
+        assert!(!restore_legacy_snapshot_once(&database, &legacy).unwrap());
+        assert_eq!(std::fs::read(&database).unwrap(), b"legacy database");
+    }
 }

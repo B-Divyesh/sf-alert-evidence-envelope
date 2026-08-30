@@ -26,6 +26,6 @@ COPY --from=backend /app/target/release/alert-evidence-envelope /usr/local/bin/a
 COPY --from=frontend /app/dist ./dist
 RUN mkdir -p /data && chown envelope:envelope /data
 USER envelope
-ENV PORT=8080 DATABASE_URL=sqlite:/tmp/envelopes.db?mode=rwc DATABASE_SNAPSHOT_FILE=/data/envelopes.snapshot.db STATIC_DIR=/app/dist SIGNING_KEY_FILE=/data/envelope-signing.key ADMIN_TOKEN_FILE=/data/admin.token INBOUND_TOKEN_FILE=/data/inbound.token
+ENV PORT=8080 DATA_DIR=/data DATABASE_URL=sqlite:/data/envelopes.db?mode=rwc STATIC_DIR=/app/dist SIGNING_KEY_FILE=/data/envelope-signing.key ADMIN_TOKEN_FILE=/data/admin.token INBOUND_TOKEN_FILE=/data/inbound.token
 EXPOSE 8080
 ENTRYPOINT ["alert-evidence-envelope"]

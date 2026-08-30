@@ -11,14 +11,21 @@
     "claim": "Evidence is recursively redacted, limited by item and byte caps, and signed with HMAC-SHA256.",
     "where": "How it works, route builder, README",
     "test": "cargo test recursively_redacts_and_bounds_evidence --locked",
-    "sandbox": "Construct two nested evidence records with private fields and a one-item cap; assert truncation, redaction, and signature shape."
+    "sandbox": "Construct two nested evidence records with private fields and a one-item cap; assert truncation and redaction, then recompute and verify the HMAC over the unsigned envelope."
+  },
+  {
+    "id": "fixed-query-source",
+    "claim": "The relay fetches evidence only from the configured source and sends only the alert query plus the fixed item limit.",
+    "where": "How it works, route builder, README",
+    "test": "cargo test configured_source_receives_only_the_alert_query_and_fixed_limit --locked",
+    "sandbox": "Use a local capture source and an alert containing a hostile source URL; assert the configured source receives one GET with only q and limit parameters."
   },
   {
     "id": "isolated-demo",
     "claim": "Demo data never enters protected route history and the workspace expires after 24 hours.",
     "where": "Landing facts, demo banner, privacy, README",
     "test": "cargo test demo_session_is_ephemeral_and_cannot_reach_real_history --locked",
-    "sandbox": "Temporary SQLite database; create an expiring in-memory demo session, preview sample data, then assert protected history remains empty."
+    "sandbox": "Temporary SQLite database; assert the returned and stored expiry is 24 hours, reject and delete an expired session, preview sample data, and assert protected history stays empty."
   },
   {
     "id": "raw-not-retained",
@@ -70,17 +77,24 @@
     "sandbox": "Send 60 concurrent API requests from one forwarded IP; assert 429 with Retry-After 1 and an independent IP remains available."
   },
   {
+    "id": "local-policy-presets",
+    "claim": "A valid Field Kit license adds named redaction presets stored only in this browser.",
+    "where": "Field Kit, privacy, README",
+    "test": "npm run test:claims -- --grep @claim:local-policy-presets",
+    "sandbox": "Fresh browser context with a recorded valid cached verdict; save a named policy, inspect localStorage, reload, and apply the preserved fields."
+  },
+  {
     "id": "field-kit-purchase",
-    "claim": "The Field Kit is a $39 USD one-time purchase through Sociobot/Dodo.",
+    "claim": "The Field Kit page shows a $39 USD one-time price and uses the official Sociobot product checkout URL.",
     "where": "Landing facts, Field Kit, terms, README",
     "test": "npm run test:claims -- --grep @claim:field-kit-purchase",
-    "sandbox": "Read the rendered link; assert production and registered pilot endpoints redirect to the matching Dodo checkout hosts without making a payment."
+    "sandbox": "Read the rendered price and buy link; assert the link uses the official api.sociobot.in product checkout endpoint without depending on shared checkout availability."
   },
   {
     "id": "durable-deployment",
     "claim": "The deployment uses one application replica and persists committed route state on a durable Azure File share at /data.",
     "where": "README, deployment helper",
-    "test": "cargo test durable_snapshot_restores_committed_route_state --locked && npm run test:deployment-policy && npm run verify:live-topology",
-    "sandbox": "Delete the local SQLite file and restore its committed route from the mounted-file snapshot; then query Azure for one running replica, /data, and matching live identity."
+    "test": "cargo test durable_sqlite_restores_committed_route_state --locked && cargo test demo_create_then_preview_survives_a_fresh_database_connection --locked && npm run test:deployment-policy && npm run verify:live-topology",
+    "sandbox": "Reopen the same SQLite file and recover committed route and demo-session state; then query only the scoped app for one running replica, /data, matching live identity, and 20 fresh-connection previews."
   }
 ]

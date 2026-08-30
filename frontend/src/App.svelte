@@ -286,7 +286,7 @@
   <article class="legal">
     <p class="eyebrow">Privacy notice</p><h1>How this relay handles data</h1>
     <p class="lede">The self-hosted core is designed to transform incident data without retaining raw alert bodies or raw fetched logs.</p>
-    <h2>What the relay stores</h2><p>SQLite stores channel configuration and a 20-entry delivery ledger: envelope ID, service label, delivery state, query fingerprint, time, item count, and byte count. It does not store raw inbound payloads, evidence excerpts, upstream tokens, destination tokens, or license tokens.</p>
+    <h2>What the relay stores</h2><p>SQLite stores channel settings, short-lived demo session IDs, and a 20-entry delivery ledger. Demo session rows contain only an ID and expiry time. The relay does not store raw alerts, evidence, or license tokens.</p>
     <h2>Where secrets live</h2><p>Upstream and destination bearer tokens, admin access, and the signing key come from environment variables. Destination and source URLs may be stored in the local SQLite configuration. Browser license tokens and paid policy presets remain in your browser’s local storage.</p>
     <h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification contacts Sociobot when a license is present, at most once per day. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
     <h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them. For purchase records and refunds, contact Sociobot as merchant of record.</p>
@@ -297,7 +297,7 @@
     <p class="eyebrow">Terms</p><h1>Terms of use</h1>
     <p class="lede">Alert Evidence Envelope is a transformation and delivery tool. It does not evaluate alerts, replace your incident system, or guarantee delivery.</p>
     <h2>Operator responsibility</h2><p>You are responsible for endpoint authorization, lawful processing, redaction policies, destination access, secret rotation, and testing size limits before production use. Do not place credentials in JSON payloads or browser configuration.</p>
-    <h2>Field Kit license</h2><p>The $39 Field Kit is a one-time license for reusable local policy presets and operator templates. Sociobot/Dodo is the merchant of record. Refunds are handled there and revoke the license automatically. Accessibility, export, redaction, signing, and all safety controls remain free.</p>
+    <h2>Field Kit license</h2><p>The $39 Field Kit is a one-time license for reusable local policy presets. Sociobot/Dodo is the merchant of record. Refunds are handled there and revoke the license automatically. Accessibility, export, redaction, signing, and all safety controls remain free.</p>
     <h2>Warranty and liability</h2><p>The software is provided “as is,” without warranties. To the extent permitted by law, contributors are not liable for lost data, missed notifications, or indirect damages. Validate the relay in your own environment and retain your source system as the record of truth.</p>
     <h2>Acceptable use</h2><p>Do not use the service to access systems without permission, evade provider controls, or transmit data prohibited by your organization or applicable law.</p>
     <p class="updated">Effective 27 August 2026</p>
@@ -383,7 +383,7 @@
   </section>
 
   <section id="field-kit" class="field-kit" aria-labelledby="kit-title">
-    <div><p class="eyebrow">Optional local presets</p><h2 id="kit-title">Reuse redaction policies</h2><p>The self-hosted relay and its safety controls are free. The <strong>$39 Field Kit</strong> is a one-time purchase.</p><p>It adds named redaction presets and reusable operator templates on this device.</p><ul><li>Named policies for Slack, customers, and automation</li><li>Apply a policy before saving a route</li><li>No subscription or hosted data dependency</li></ul><p class="merchant">Sociobot/Dodo is the merchant of record. Refunds are handled there.</p></div>
+    <div><p class="eyebrow">Optional local presets</p><h2 id="kit-title">Reuse redaction policies</h2><p>The self-hosted relay and its safety controls are free. The <strong>$39 Field Kit</strong> is a one-time purchase.</p><p>It adds named redaction presets on this device.</p><ul><li>Named policies for Slack, customers, and automation</li><li>Apply a policy before saving a route</li><li>No subscription or hosted data dependency</li></ul><p class="merchant">Sociobot/Dodo is the merchant of record. Refunds are handled there.</p></div>
     <div class="license-card" class:unlocked>
       <span class="license-state">{unlocked ? '✓ LICENSE ACTIVE' : 'FIELD KIT · $39 ONCE'}</span>
       {#if unlocked}

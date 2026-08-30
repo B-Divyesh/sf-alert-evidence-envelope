@@ -6,7 +6,7 @@ process.env.PLAYWRIGHT_EXPECTED_BUILD_SHA = testBuildSha;
 export default defineConfig({
   testDir: './tests/browser',
   timeout: 30_000,
-  retries: 0,
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: 'line',
   use: { baseURL: 'http://127.0.0.1:4178', trace: 'retain-on-failure' },

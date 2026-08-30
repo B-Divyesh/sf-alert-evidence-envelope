@@ -30,7 +30,7 @@ Audited 30 August 2026. Counts treat hyphenated terms and displayed code as one 
 | Preview runs never appear here. | 5 |
 | The self-hosted relay and its safety controls are free. | 9 |
 | The $39 Field Kit is a one-time purchase. | 8 |
-| It adds named redaction presets and reusable operator templates on this device. | 12 |
+| It adds named redaction presets on this device. | 8 |
 | Sociobot/Dodo is the merchant of record. | 6 |
 | Refunds are handled there. | 4 |
 | Send bounded incident evidence with a webhook alert. | 8 |
