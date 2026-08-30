@@ -52,6 +52,17 @@ template=$(jq --arg storage "$storage_name" --arg image "$image" '
 ' <<<"$app")
 payload=$(jq -n --argjson template "$template" \
   '{properties:{configuration:{activeRevisionsMode:"Single"},template:$template}}')
+
+# SQLite uses the no-lock VFS on the single-replica Azure Files mount. Drain
+# every old product revision before starting the new one so two processes can
+# never write the database during a rolling replacement.
+while IFS= read -r active_revision; do
+  [ -z "$active_revision" ] && continue
+  az containerapp revision deactivate --resource-group "$resource_group" \
+    --name "$app_name" --revision "$active_revision" --output none
+done < <(az containerapp revision list --resource-group "$resource_group" \
+  --name "$app_name" --query '[?properties.active].name' --output tsv)
+
 az rest --method patch \
   --url "https://management.azure.com${app_id}?api-version=2024-03-01" \
   --body "$payload" --output none

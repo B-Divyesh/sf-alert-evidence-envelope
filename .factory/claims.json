@@ -94,7 +94,7 @@
     "id": "durable-deployment",
     "claim": "The deployment uses one application replica and persists committed route state on a durable Azure File share at /data.",
     "where": "README, deployment helper",
-    "test": "cargo test durable_sqlite_restores_committed_route_state --locked && cargo test demo_create_then_preview_survives_a_fresh_database_connection --locked && npm run test:deployment-policy && npm run verify:live-topology",
-    "sandbox": "Reopen the same SQLite file and recover committed route and demo-session state; then query only the scoped app for one running replica, /data, matching live identity, and 20 fresh-connection previews."
+    "test": "cargo test durable_sqlite_restores_committed_route_state --locked && cargo test demo_create_then_preview_survives_a_fresh_database_connection --locked && cargo test durable_data_sqlite_uses_the_single_process_vfs --locked && npm run test:deployment-policy && npm run verify:live-topology",
+    "sandbox": "Reopen the same SQLite file and recover committed route and demo-session state; assert /data uses the single-process VFS; then query only the scoped app for one running replica, /data, matching live identity, and 20 fresh-connection previews."
   }
 ]

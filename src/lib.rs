@@ -339,11 +339,7 @@ pub async fn create_state(
     admin_token: String,
     inbound_token: String,
 ) -> anyhow::Result<AppState> {
-    // Production uses one replica and one SQLite connection on its durable
-    // /data mount, so committed channel and demo-session rows survive restarts.
-    let options = SqliteConnectOptions::from_str(database_url)?
-        .journal_mode(SqliteJournalMode::Delete)
-        .busy_timeout(Duration::from_secs(30));
+    let options = sqlite_connect_options(database_url)?;
     let db = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(options)
@@ -365,6 +361,27 @@ pub async fn create_state(
         persistence_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
     Ok(state)
+}
+
+fn sqlite_connect_options(database_url: &str) -> anyhow::Result<SqliteConnectOptions> {
+    // Azure Files does not reliably provide SQLite's POSIX byte-range locks.
+    // Production is constrained to one process and one connection, and the
+    // deploy helper drains the old revision before starting a new one. The
+    // no-lock VFS is therefore safe for /data while ordinary local files keep
+    // SQLite's normal locking behavior.
+    let path = database_url
+        .trim_start_matches("sqlite://")
+        .trim_start_matches("sqlite:")
+        .split('?')
+        .next()
+        .unwrap_or_default();
+    let mut options = SqliteConnectOptions::from_str(database_url)?
+        .journal_mode(SqliteJournalMode::Delete)
+        .busy_timeout(Duration::from_secs(30));
+    if FsPath::new(path).starts_with("/data") {
+        options = options.vfs("unix-none");
+    }
+    Ok(options)
 }
 
 pub fn api_router(state: AppState) -> Router {
@@ -1069,6 +1086,27 @@ mod tests {
         http::Request,
     };
     use tower::ServiceExt;
+
+    #[test]
+    fn durable_data_sqlite_uses_the_single_process_vfs() {
+        use sqlx::ConnectOptions;
+
+        let durable = sqlite_connect_options("sqlite:/data/envelopes.db?mode=rwc").unwrap();
+        let durable_url = durable.to_url_lossy();
+        assert_eq!(
+            durable_url
+                .query_pairs()
+                .find(|(key, _)| key == "vfs")
+                .map(|(_, value)| value.into_owned()),
+            Some("unix-none".into())
+        );
+
+        let local = sqlite_connect_options("sqlite:data/envelopes.db?mode=rwc").unwrap();
+        assert!(local
+            .to_url_lossy()
+            .query_pairs()
+            .all(|(key, _)| key != "vfs"));
+    }
 
     #[test]
     fn recursively_redacts_and_bounds_evidence() {
