@@ -64,23 +64,25 @@ az rest --method patch \
 
 for _ in $(seq 1 "${DEPLOY_VERIFY_ATTEMPTS:-30}"); do
   effective=$(az containerapp show --resource-group "$resource_group" --name "$app_name" --output json)
-  if jq -e --arg storage "$storage_name" '
+  if jq -e --arg storage "$storage_name" --arg image "$image" '
     .properties.latestRevisionName == .properties.latestReadyRevisionName
     and .properties.template.scale.minReplicas == 1
     and .properties.template.scale.maxReplicas == 1
     and any(.properties.template.volumes[]?; .name == "envelope-data" and .storageType == "AzureFile" and .storageName == $storage)
     and any(.properties.template.containers[]?; .name == "app" and any(.volumeMounts[]?; .volumeName == "envelope-data" and .mountPath == "/data"))
+    and any(.properties.template.containers[]?; .name == "app" and .image == $image)
   ' >/dev/null <<<"$effective"; then
     break
   fi
   sleep "${DEPLOY_VERIFY_INTERVAL_SECONDS:-10}"
 done
 
-if ! jq -e --arg storage "$storage_name" '
+if ! jq -e --arg storage "$storage_name" --arg image "$image" '
   .properties.latestRevisionName == .properties.latestReadyRevisionName
   and .properties.template.scale.minReplicas == 1
   and .properties.template.scale.maxReplicas == 1
   and any(.properties.template.volumes[]?; .storageName == $storage)
+  and any(.properties.template.containers[]?; .name == "app" and .image == $image)
 ' >/dev/null <<<"$effective"; then
   echo "ERROR: deployment did not reach one ready replica with durable /data" >&2
   exit 1

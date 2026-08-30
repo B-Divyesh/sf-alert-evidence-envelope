@@ -9,6 +9,7 @@ assert.match(deploy, /scale\.minReplicas == 1/);
 assert.match(deploy, /scale\.maxReplicas == 1/);
 assert.match(deploy, /activeRevisionsMode:\"Single\"/);
 assert.match(deploy, /\.revisionSuffix = null/);
+assert.match(deploy, /\.image == \$image/);
 assert.match(deploy, /storageType: "AzureFile"/);
 assert.match(deploy, /mountPath: "\/data"/);
 assert.match(deploy, /verify-live-topology\.sh/);
