@@ -55,21 +55,55 @@ payload=$(jq -n --argjson template "$template" \
 
 # SQLite uses the no-lock VFS on the single-replica Azure Files mount. Drain
 # every old product revision before starting the new one so two processes can
-# never write the database during a rolling replacement.
-while IFS= read -r active_revision; do
-  [ -z "$active_revision" ] && continue
-  az containerapp revision deactivate --resource-group "$resource_group" \
-    --name "$app_name" --revision "$active_revision" --output none
-done < <(az containerapp revision list --resource-group "$resource_group" \
-  --name "$app_name" --query '[?properties.active].name' --output tsv)
+# never write the database during a rolling replacement. If a prior patch was
+# accepted despite a control-plane error, reactivate that exact revision rather
+# than draining it and submitting an identical no-op patch.
+desired_applied=false
+if jq -e --arg storage "$storage_name" --arg image "$image" '
+  .properties.configuration.activeRevisionsMode == "Single"
+  and .properties.template.scale.minReplicas == 1
+  and .properties.template.scale.maxReplicas == 1
+  and any(.properties.template.volumes[]?; .storageName == $storage)
+  and any(.properties.template.containers[]?; .name == "app" and .image == $image and any(.volumeMounts[]?; .mountPath == "/data"))
+' >/dev/null <<<"$app"; then
+  desired_applied=true
+fi
 
-az rest --method patch \
-  --url "https://management.azure.com${app_id}?api-version=2024-03-01" \
-  --body "$payload" --output none
+if [ "$desired_applied" = false ]; then
+  while IFS= read -r active_revision; do
+    [ -z "$active_revision" ] && continue
+    az containerapp revision deactivate --resource-group "$resource_group" \
+      --name "$app_name" --revision "$active_revision" --output none
+  done < <(az containerapp revision list --resource-group "$resource_group" \
+    --name "$app_name" --query '[?properties.active].name' --output tsv)
 
-effective=''
+  if ! az rest --method patch \
+    --url "https://management.azure.com${app_id}?api-version=2024-03-01" \
+    --body "$payload" --output none; then
+    app=$(az containerapp show --resource-group "$resource_group" --name "$app_name" --output json)
+    jq -e --arg storage "$storage_name" --arg image "$image" '
+      .properties.template.scale.minReplicas == 1
+      and .properties.template.scale.maxReplicas == 1
+      and any(.properties.template.volumes[]?; .storageName == $storage)
+      and any(.properties.template.containers[]?; .name == "app" and .image == $image and any(.volumeMounts[]?; .mountPath == "/data"))
+    ' >/dev/null <<<"$app" || exit 1
+  fi
+fi
+
+effective=$(az containerapp show --resource-group "$resource_group" --name "$app_name" --output json)
+latest_revision=$(jq -er '.properties.latestRevisionName' <<<"$effective")
+latest_active=$(az containerapp revision show --resource-group "$resource_group" --name "$app_name" \
+  --revision "$latest_revision" --query properties.active --output tsv)
+if [ "$latest_active" != true ]; then
+  az containerapp revision activate --resource-group "$resource_group" \
+    --name "$app_name" --revision "$latest_revision" --output none
+fi
+
 for _ in $(seq 1 "${DEPLOY_VERIFY_ATTEMPTS:-30}"); do
   effective=$(az containerapp show --resource-group "$resource_group" --name "$app_name" --output json)
+  latest_revision=$(jq -er '.properties.latestRevisionName' <<<"$effective")
+  revision=$(az containerapp revision show --resource-group "$resource_group" \
+    --name "$app_name" --revision "$latest_revision" --output json)
   if jq -e --arg storage "$storage_name" --arg image "$image" '
     .properties.latestRevisionName == .properties.latestReadyRevisionName
     and .properties.configuration.activeRevisionsMode == "Single"
@@ -77,7 +111,9 @@ for _ in $(seq 1 "${DEPLOY_VERIFY_ATTEMPTS:-30}"); do
     and .properties.template.scale.maxReplicas == 1
     and any(.properties.template.volumes[]?; .name == "envelope-data" and .storageType == "AzureFile" and .storageName == $storage)
     and any(.properties.template.containers[]?; .name == "app" and .image == $image and any(.volumeMounts[]?; .volumeName == "envelope-data" and .mountPath == "/data"))
-  ' >/dev/null <<<"$effective"; then
+  ' >/dev/null <<<"$effective" \
+    && jq -e '.properties.active == true and .properties.healthState == "Healthy" and .properties.replicas == 1' \
+      >/dev/null <<<"$revision"; then
     break
   fi
   sleep "${DEPLOY_VERIFY_INTERVAL_SECONDS:-10}"

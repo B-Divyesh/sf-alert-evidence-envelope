@@ -19,6 +19,9 @@ assert.doesNotMatch(deploy, /storage account keys list|az storage share create|c
 const drain = deploy.indexOf('revision deactivate');
 const replace = deploy.indexOf('az rest --method patch');
 assert.ok(drain >= 0 && replace >= 0 && drain < replace, 'old revisions must drain before replacement');
+assert.match(deploy, /desired_applied=false/);
+assert.match(deploy, /revision activate/);
+assert.match(deploy, /\.properties\.active == true and \.properties\.healthState == "Healthy" and \.properties\.replicas == 1/);
 assert.match(dockerfile, /USER envelope/);
 assert.match(dockerfile, /DATA_DIR=\/data/);
 assert.match(dockerfile, /DATABASE_URL=sqlite:\/data\/envelopes\.db\?mode=rwc/);
