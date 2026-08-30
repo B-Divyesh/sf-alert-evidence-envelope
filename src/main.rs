@@ -1,5 +1,6 @@
 use alert_evidence_envelope::{
-    api_router, create_state, health, load_or_generate_signing_key, load_or_generate_token,
+    api_router, create_state_with_snapshot, health, load_or_generate_signing_key,
+    load_or_generate_token,
 };
 use anyhow::Context;
 use axum::{
@@ -11,7 +12,7 @@ use axum::{
     Json, Router,
 };
 use serde_json::json;
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, path::PathBuf};
 use tokio::signal;
 use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorError,
@@ -70,7 +71,18 @@ async fn main() -> anyhow::Result<()> {
         inbound_token_source = inbound_token_source.label(),
         inbound_token_path, "inbound relay access configured"
     );
-    let state = create_state(&database_url, signing_key, admin_token, inbound_token).await?;
+    let snapshot = env::var("DATABASE_SNAPSHOT_FILE")
+        .ok()
+        .map(|durable| sqlite_file_path(&database_url).map(|database| (database, durable.into())))
+        .transpose()?;
+    let state = create_state_with_snapshot(
+        &database_url,
+        signing_key,
+        admin_token,
+        inbound_token,
+        snapshot,
+    )
+    .await?;
     let static_dir = env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let index = format!("{static_dir}/index.html");
     let governor = GovernorConfigBuilder::default()
@@ -134,6 +146,15 @@ async fn main() -> anyhow::Result<()> {
     .with_graceful_shutdown(shutdown())
     .await?;
     Ok(())
+}
+
+fn sqlite_file_path(database_url: &str) -> anyhow::Result<PathBuf> {
+    let path = database_url
+        .strip_prefix("sqlite:")
+        .and_then(|value| value.split('?').next())
+        .filter(|value| !value.is_empty() && *value != ":memory:")
+        .context("DATABASE_SNAPSHOT_FILE requires a file-backed sqlite DATABASE_URL")?;
+    Ok(PathBuf::from(path))
 }
 
 async fn not_found() -> impl IntoResponse {

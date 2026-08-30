@@ -54,7 +54,8 @@ With no destination, the relay returns the signed envelope and records delivery 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP listener |
-| `DATABASE_URL` | `sqlite:data/envelopes.db?mode=rwc` | Metadata and route database |
+| `DATABASE_URL` | `sqlite:data/envelopes.db?mode=rwc` | Live metadata and route database |
+| `DATABASE_SNAPSHOT_FILE` | unset | Durable snapshot path for mounted storage |
 | `STATIC_DIR` | `dist` | Built frontend directory |
 | `ENVELOPE_SIGNING_KEY` | generated | Optional HMAC key override of at least 32 bytes |
 | `SIGNING_KEY_FILE` | `data/envelope-signing.key` | Persisted generated signing key |
@@ -100,9 +101,9 @@ npm run deploy
 npm run verify:live-topology
 ```
 
-The deployment command uses the factory container builder. It then mounts a product-specific Azure File share at `/data` and fixes scaling at one replica.
+The deployment command builds in the factory registry. It then mounts a product-specific Azure File share at `/data`, selects single-revision mode, and fixes scaling at one replica.
 
-One replica prevents SQLite state and in-process rate limits from splitting across workers. The mounted share retains settings, metadata, signing identity, and access tokens across revisions.
+One replica prevents SQLite state and in-process rate limits from splitting across workers. The container runs SQLite on its local filesystem and atomically snapshots each committed change to the mounted share. This avoids SQLite locking on SMB while retaining settings and metadata across revisions. The share also retains signing identity and access tokens.
 
 The image runs as the non-root `envelope` user. It starts with only `PORT` supplied by the platform.
 

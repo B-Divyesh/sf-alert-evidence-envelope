@@ -78,9 +78,9 @@
   },
   {
     "id": "durable-deployment",
-    "claim": "The deployment uses one application replica and mounts a durable Azure File share at /data.",
+    "claim": "The deployment uses one application replica and persists committed route state on a durable Azure File share at /data.",
     "where": "README, deployment helper",
-    "test": "npm run test:deployment-policy && npm run verify:live-topology",
-    "sandbox": "Inspect the deployment policy locally, then query Azure and the live health endpoint for one running replica, the /data mount, and matching build identity."
+    "test": "cargo test durable_snapshot_restores_committed_route_state --locked && npm run test:deployment-policy && npm run verify:live-topology",
+    "sandbox": "Delete the local SQLite file and restore its committed route from the mounted-file snapshot; then query Azure for one running replica, /data, and matching live identity."
   }
 ]

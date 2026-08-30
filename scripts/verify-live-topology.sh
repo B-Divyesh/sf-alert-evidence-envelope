@@ -16,7 +16,8 @@ revision=$(jq -er '.properties.latestRevisionName' <<<"$topology")
 ready_revision=$(jq -er '.properties.latestReadyRevisionName' <<<"$topology")
 [ "$revision" = "$ready_revision" ] || fail "latest revision is not ready"
 jq -e --arg storage "$storage_name" '
-  .properties.template.scale == {minReplicas: 1, maxReplicas: 1}
+  .properties.configuration.activeRevisionsMode == "Single"
+  and .properties.template.scale == {minReplicas: 1, maxReplicas: 1}
   and any(.properties.template.volumes[]?; .name == "envelope-data" and .storageType == "AzureFile" and .storageName == $storage)
   and any(.properties.template.containers[]?; .name == "app" and any(.volumeMounts[]?; .volumeName == "envelope-data" and .mountPath == "/data"))
 ' >/dev/null <<<"$topology" || fail "expected one replica with the Azure File volume mounted at /data"
@@ -37,5 +38,4 @@ live_sha=$(jq -er '.build' <<<"$health")
 [ -z "$expected_sha" ] || [ "$live_sha" = "$expected_sha" ] || fail "live build $live_sha does not match $expected_sha"
 
 jq -n --arg result PASS --arg build "$live_sha" --arg revision "$revision" --arg image "$image" --arg storage "$storage_name" --arg share "$share_name" \
-  '{result:$result,build:$build,revision:$revision,image:$image,topology:{minReplicas:1,maxReplicas:1,runningReplicas:1,mountPath:"/data",storage:$storage,share:$share}}'
-
+  '{result:$result,build:$build,revision:$revision,image:$image,topology:{revisionMode:"Single",minReplicas:1,maxReplicas:1,runningReplicas:1,mountPath:"/data",storage:$storage,share:$share}}'

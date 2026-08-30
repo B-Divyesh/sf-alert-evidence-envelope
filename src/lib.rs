@@ -21,7 +21,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::OpenOptions,
     io::Write,
-    path::Path as FsPath,
+    path::{Path as FsPath, PathBuf},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -46,6 +46,14 @@ pub struct AppState {
     pub destination_token: Option<Arc<String>>,
     pub destination_url_override: Option<Arc<String>>,
     demo_sessions: Arc<tokio::sync::RwLock<HashMap<String, chrono::DateTime<Utc>>>>,
+    snapshot: Option<Arc<SnapshotPaths>>,
+    persistence_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+#[derive(Debug)]
+struct SnapshotPaths {
+    database: PathBuf,
+    durable: PathBuf,
 }
 
 /// Loads an operator token or generates a persistent 256-bit hexadecimal token.
@@ -344,9 +352,23 @@ pub async fn create_state(
     admin_token: String,
     inbound_token: String,
 ) -> anyhow::Result<AppState> {
+    create_state_with_snapshot(database_url, signing_key, admin_token, inbound_token, None).await
+}
+
+pub async fn create_state_with_snapshot(
+    database_url: &str,
+    signing_key: Vec<u8>,
+    admin_token: String,
+    inbound_token: String,
+    snapshot: Option<(PathBuf, PathBuf)>,
+) -> anyhow::Result<AppState> {
+    let snapshot = snapshot.map(|(database, durable)| SnapshotPaths { database, durable });
+    if let Some(paths) = &snapshot {
+        restore_database_snapshot(paths).await?;
+    }
     // Azure Files is an SMB filesystem. A single SQLite connection avoids
-    // cross-connection lock propagation on that durable mount; the timeout
-    // absorbs short lock-release delays during revision startup.
+    // cross-connection contention. In production the live database remains
+    // local and committed copies are written to the mounted durable share.
     let options = SqliteConnectOptions::from_str(database_url)?
         .journal_mode(SqliteJournalMode::Delete)
         .busy_timeout(Duration::from_secs(30));
@@ -356,7 +378,7 @@ pub async fn create_state(
         .await?;
     migrate(&db).await?;
     seed_default(&db).await?;
-    Ok(AppState {
+    let state = AppState {
         db,
         client: Client::builder()
             .timeout(Duration::from_secs(8))
@@ -369,7 +391,64 @@ pub async fn create_state(
         destination_token: std::env::var("DESTINATION_BEARER_TOKEN").ok().map(Arc::new),
         destination_url_override: std::env::var("DESTINATION_URL").ok().map(Arc::new),
         demo_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-    })
+        snapshot: snapshot.map(Arc::new),
+        persistence_lock: Arc::new(tokio::sync::Mutex::new(())),
+    };
+    persist_database_snapshot(&state).await?;
+    Ok(state)
+}
+
+async fn restore_database_snapshot(paths: &SnapshotPaths) -> anyhow::Result<()> {
+    if !paths.durable.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = paths.database.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let stale = PathBuf::from(format!("{}{}", paths.database.display(), suffix));
+        let _ = tokio::fs::remove_file(stale).await;
+    }
+    tokio::fs::copy(&paths.durable, &paths.database)
+        .await
+        .with_context(|| {
+            format!(
+                "restore SQLite snapshot {} to {}",
+                paths.durable.display(),
+                paths.database.display()
+            )
+        })?;
+    Ok(())
+}
+
+async fn persist_database_snapshot(state: &AppState) -> anyhow::Result<()> {
+    let Some(paths) = &state.snapshot else {
+        return Ok(());
+    };
+    let parent = paths
+        .durable
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("snapshot path must have a parent directory"))?;
+    tokio::fs::create_dir_all(parent).await?;
+    let temporary = paths.durable.with_extension("db.next");
+    tokio::fs::copy(&paths.database, &temporary)
+        .await
+        .with_context(|| {
+            format!(
+                "copy SQLite database {} to durable snapshot {}",
+                paths.database.display(),
+                temporary.display()
+            )
+        })?;
+    let temporary_file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .open(&temporary)
+        .await?;
+    temporary_file.sync_all().await?;
+    tokio::fs::rename(&temporary, &paths.durable)
+        .await
+        .with_context(|| format!("publish durable snapshot {}", paths.durable.display()))?;
+    Ok(())
 }
 
 pub fn api_router(state: AppState) -> Router {
@@ -488,6 +567,7 @@ async fn put_config(
         .map_err(|_| ApiError::BadRequest("request body must be valid channel JSON".into()))?;
     config.id = "primary".into();
     validate_config(&config)?;
+    let _persistence = state.persistence_lock.lock().await;
     sqlx::query("INSERT INTO channels (id, config, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at")
         .bind(&config.id)
         .bind(serde_json::to_string(&config).map_err(|e| ApiError::Internal(e.into()))?)
@@ -495,6 +575,9 @@ async fn put_config(
         .execute(&state.db)
         .await
         .map_err(|e| ApiError::Internal(e.into()))?;
+    persist_database_snapshot(&state)
+        .await
+        .map_err(ApiError::Internal)?;
     Ok(Json(config))
 }
 
@@ -733,7 +816,7 @@ async fn relay(
         Ok(label) => ("created", label.clone()),
         Err(error) => ("failed", error.to_string()),
     };
-    record_delivery(&state.db, &config.id, &envelope, status).await?;
+    record_delivery(&state, &config.id, &envelope, status).await?;
     delivery?;
     Ok((
         StatusCode::ACCEPTED,
@@ -1019,16 +1102,20 @@ fn clean_network_error(raw: &str) -> String {
 }
 
 async fn record_delivery(
-    db: &SqlitePool,
+    state: &AppState,
     channel: &str,
     envelope: &EvidenceEnvelope,
     status: &str,
 ) -> Result<(), ApiError> {
+    let _persistence = state.persistence_lock.lock().await;
     sqlx::query("INSERT INTO deliveries (id, channel_id, service, status, fingerprint, created_at, evidence_items, evidence_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&envelope.id).bind(channel).bind(&envelope.summary.service).bind(status)
         .bind(&envelope.query_fingerprint).bind(&envelope.created_at)
         .bind(envelope.evidence_items as i64).bind(envelope.evidence_bytes as i64)
-        .execute(db).await.map_err(|e| ApiError::Internal(e.into()))?;
+        .execute(&state.db).await.map_err(|e| ApiError::Internal(e.into()))?;
+    persist_database_snapshot(state)
+        .await
+        .map_err(ApiError::Internal)?;
     Ok(())
 }
 
@@ -1523,6 +1610,63 @@ mod tests {
             .unwrap();
         assert_eq!(journal_mode, "delete");
         assert_eq!(busy_timeout, 30_000);
+    }
+
+    #[tokio::test]
+    async fn durable_snapshot_restores_committed_route_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("runtime.db");
+        let durable = directory
+            .path()
+            .join("mounted")
+            .join("envelopes.snapshot.db");
+        let database_url = format!("sqlite:{}?mode=rwc", database.display());
+        let state = create_state_with_snapshot(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+            Some((database.clone(), durable.clone())),
+        )
+        .await
+        .unwrap();
+        let config = ChannelConfig {
+            name: "Persisted after revision replacement".into(),
+            ..Default::default()
+        };
+        let response = api_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/config")
+                    .header("content-type", "application/json")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
+                    .body(Body::from(serde_json::to_vec(&config).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(std::fs::metadata(&durable).unwrap().len() > 0);
+        state.db.close().await;
+        std::fs::remove_file(&database).unwrap();
+
+        let restored = create_state_with_snapshot(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+            Some((database, durable)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            load_config(&restored.db, "primary").await.unwrap().name,
+            "Persisted after revision replacement"
+        );
     }
 
     #[tokio::test]
