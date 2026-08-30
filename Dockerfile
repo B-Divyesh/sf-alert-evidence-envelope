@@ -1,5 +1,7 @@
 FROM node:22-alpine AS frontend
 WORKDIR /app
+ARG BUILD_SHA=development
+ENV VITE_BUILD_SHA=$BUILD_SHA
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY frontend ./frontend
@@ -22,6 +24,6 @@ COPY --from=backend /app/target/release/alert-evidence-envelope /usr/local/bin/a
 COPY --from=frontend /app/dist ./dist
 RUN mkdir -p /data && chown envelope:envelope /data
 USER envelope
-ENV PORT=8080 DATABASE_URL=sqlite:/data/envelopes.db?mode=rwc STATIC_DIR=/app/dist SIGNING_KEY_FILE=/data/envelope-signing.key
+ENV PORT=8080 DATABASE_URL=sqlite:/data/envelopes.db?mode=rwc STATIC_DIR=/app/dist SIGNING_KEY_FILE=/data/envelope-signing.key ADMIN_TOKEN_FILE=/data/admin.token INBOUND_TOKEN_FILE=/data/inbound.token
 EXPOSE 8080
 ENTRYPOINT ["alert-evidence-envelope"]

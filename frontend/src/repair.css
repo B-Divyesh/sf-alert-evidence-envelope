@@ -33,3 +33,86 @@ pre:focus-visible {
     color: #101815;
   }
 }
+
+/* Release QA: every navigation target remains a full-size control. */
+.brand,
+.site-header nav a,
+.footer-links a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.action-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.load-route {
+  margin-top: 16px;
+}
+
+.form-actions small {
+  color: var(--muted);
+  flex-basis: 100%;
+}
+
+.demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 6px clamp(18px, 5vw, 72px);
+  border-bottom: 1px solid var(--line);
+  background: var(--deep);
+  color: var(--paper);
+  font-size: 14px;
+}
+
+.demo-banner span {
+  margin-right: auto;
+  opacity: 0.82;
+}
+
+.demo-banner button,
+.demo-banner a {
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.section-heading h1 {
+  margin: 0 0 18px;
+  font: 600 clamp(38px, 4vw, 54px)/1.04 Fraunces, serif;
+  letter-spacing: -0.025em;
+}
+
+@media (max-width: 600px) {
+  .demo-banner {
+    position: relative;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 12px;
+  }
+
+  .demo-banner strong,
+  .demo-banner span {
+    flex-basis: 100%;
+  }
+
+  .demo-banner button,
+  .demo-banner a {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+  }
+}

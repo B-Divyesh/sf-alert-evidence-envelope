@@ -25,8 +25,8 @@ UI transitions last 180–240 ms and animate only opacity and transform. Pipelin
 
 ## Asset plan and provenance
 
-One original raster hero depicts an abstract nocturnal topographic incident map resolving into a sealed evidence packet. It will ship as responsive AVIF/WebP, ≤300 KB for mobile, with explicit dimensions. All icons are original inline SVG using the same contour-line geometry.
+One original raster hero depicts an abstract nocturnal topographic incident map resolving into a sealed evidence packet. It ships as responsive WebP below 300 KB on mobile, with explicit dimensions. All icons are original inline SVG using the same contour-line geometry.
 
 **Prompt sheet:** “Editorial topographic cartography of a software incident: layered cream survey paper floating over deep pine terrain, precise contour lines and coordinate ticks, one burnt-amber alert route entering from the left, passing through a small redaction checkpoint, resolving into a compact sealed dark-green evidence envelope on the right, subtle ink texture, raking field-station light, oblique 35mm lens, restrained cream/pine/amber palette, sophisticated technical publication, abundant negative space, no humans, no screens, no dashboards, no text, no letters, no numbers, no logos, no watermark, no neon gradient, no glossy 3D, no corporate stock art.”
 
-The image is generated specifically for this product with the factory Azure image deployment (`factory-image`) on 2026-08-27. Generated imagery is original and disclosed in the footer. Prompt metadata is retained beside source assets. The mobile WebP is a reviewed 720 × 480 derivative of that source (40,982 bytes); the desktop WebP remains 1536 × 1024.
+The image was generated specifically for this product with the factory Azure image deployment (`factory-image`) on 2026-08-27. Generated imagery is original and disclosed in the footer. Prompt metadata is retained beside source assets. The mobile WebP is a reviewed 720 × 480 derivative of that source (40,982 bytes); the desktop WebP remains 1536 × 1024. The 1200 × 630 social card and 180 px touch icon are crops of the same original source, produced locally on 2026-08-30.

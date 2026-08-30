@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://alert-evidence-envelope.sociobot.in/sitemap.xml

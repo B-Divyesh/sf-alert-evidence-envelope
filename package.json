@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite --config frontend/vite.config.ts",
     "build": "vite build --config frontend/vite.config.ts",
-    "test": "npm run check && cargo test --locked && npm run build && playwright test",
+    "test": "npm run check && cargo test --locked && npm run test:deployment-policy && npm run build && playwright test",
+    "test:claims": "npm run build && playwright test",
+    "test:deployment-policy": "node scripts/test-deployment-policy.mjs",
+    "verify:live-topology": "bash scripts/verify-live-topology.sh",
+    "deploy": "bash scripts/deploy-durable-container.sh",
     "test:e2e": "playwright test",
     "check": "svelte-check --tsconfig ./frontend/tsconfig.json",
     "preview": "vite preview --config frontend/vite.config.ts --host 0.0.0.0"

@@ -1,0 +1,86 @@
+[
+  {
+    "id": "demo-envelope",
+    "claim": "The one-click demo builds a bounded, recursively redacted, HMAC-signed envelope with service, error, and first-seen fields.",
+    "where": "Landing first screen, demo, README",
+    "test": "npm run test:claims -- --grep @claim:demo-envelope",
+    "sandbox": "Fresh browser context at /; click Try it with sample data; assert /demo, summary fields, redactions, and a 64-hex HMAC signature."
+  },
+  {
+    "id": "bounded-redacted-signed",
+    "claim": "Evidence is recursively redacted, limited by item and byte caps, and signed with HMAC-SHA256.",
+    "where": "How it works, route builder, README",
+    "test": "cargo test recursively_redacts_and_bounds_evidence --locked",
+    "sandbox": "Construct two nested evidence records with private fields and a one-item cap; assert truncation, redaction, and signature shape."
+  },
+  {
+    "id": "isolated-demo",
+    "claim": "Demo data never enters protected route history and the workspace expires after 24 hours.",
+    "where": "Landing facts, demo banner, privacy, README",
+    "test": "cargo test demo_session_is_ephemeral_and_cannot_reach_real_history --locked",
+    "sandbox": "Temporary SQLite database; create an expiring in-memory demo session, preview sample data, then assert protected history remains empty."
+  },
+  {
+    "id": "raw-not-retained",
+    "claim": "SQLite does not retain inbound alert bodies or evidence excerpts.",
+    "where": "Privacy, delivery history, README",
+    "test": "cargo test claim_raw_payload_is_not_persisted --locked",
+    "sandbox": "Temporary SQLite database; relay unique private markers, close the pool, and assert none occur in the database bytes."
+  },
+  {
+    "id": "provider-signature",
+    "claim": "A supported provider signature is passed to the destination with the signed envelope.",
+    "where": "How it works, README",
+    "test": "cargo test claim_provider_signature_is_preserved_across_relay --locked",
+    "sandbox": "Temporary database and local capture server; relay a signed alert and assert both original and envelope signature headers arrive."
+  },
+  {
+    "id": "history-limit",
+    "claim": "Protected history returns only the latest 20 delivery metadata records.",
+    "where": "Delivery history, privacy, README",
+    "test": "cargo test claim_history_keeps_only_the_latest_twenty_records --locked",
+    "sandbox": "Temporary database; accept 25 authenticated relays and assert history returns exactly 20 rows."
+  },
+  {
+    "id": "protected-real-apis",
+    "claim": "Route configuration, preview, history, and inbound relay traffic require separate server credentials.",
+    "where": "Route builder, privacy, README",
+    "test": "cargo test unauthorized_requests_are_rejected_before_body_parsing --locked",
+    "sandbox": "Temporary server state; send unauthenticated malformed requests to every real-data endpoint and assert 401 before parsing."
+  },
+  {
+    "id": "no-tracking",
+    "claim": "The normal demo uses no analytics, advertising, third-party scripts, or hosted fonts.",
+    "where": "Landing facts, privacy, README",
+    "test": "npm run test:claims -- --grep @claim:no-tracking",
+    "sandbox": "Fresh browser context; record the complete demo request log and assert every request uses the product origin."
+  },
+  {
+    "id": "offline-demo",
+    "claim": "The last sample envelope reloads offline after one online demo visit.",
+    "where": "README, demo documentation",
+    "test": "npm run test:claims -- --grep @claim:offline-demo",
+    "sandbox": "Dedicated fresh browser context; load /demo, wait for the service worker, switch offline, reload, and assert the sample result remains."
+  },
+  {
+    "id": "rate-limit",
+    "claim": "API clients receive a 40-request burst, then 20 requests per second, keyed by the first forwarded client IP.",
+    "where": "README",
+    "test": "npm run test:claims -- --grep @claim:rate-limit",
+    "sandbox": "Send 60 concurrent API requests from one forwarded IP; assert 429 with Retry-After 1 and an independent IP remains available."
+  },
+  {
+    "id": "field-kit-purchase",
+    "claim": "The Field Kit is a $39 USD one-time purchase through Sociobot/Dodo.",
+    "where": "Landing facts, Field Kit, terms, README",
+    "test": "npm run test:claims -- --grep @claim:field-kit-purchase",
+    "sandbox": "Read the rendered link; assert production and registered pilot endpoints redirect to the matching Dodo checkout hosts without making a payment."
+  },
+  {
+    "id": "durable-deployment",
+    "claim": "The deployment uses one application replica and mounts a durable Azure File share at /data.",
+    "where": "README, deployment helper",
+    "test": "npm run test:deployment-policy && npm run verify:live-topology",
+    "sandbox": "Inspect the deployment policy locally, then query Azure and the live health endpoint for one running replica, the /data mount, and matching build identity."
+  }
+]

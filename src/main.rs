@@ -1,17 +1,21 @@
-use alert_evidence_envelope::{api_router, create_state, load_or_generate_signing_key};
+use alert_evidence_envelope::{
+    api_router, create_state, health, load_or_generate_signing_key, load_or_generate_token,
+};
 use anyhow::Context;
 use axum::{
     extract::Request,
-    http::{header, HeaderName, HeaderValue},
+    http::{header, HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
-    response::Response,
-    routing::get_service,
-    Router,
+    response::{Html, IntoResponse, Response},
+    routing::{get, get_service},
+    Json, Router,
 };
+use serde_json::json;
 use std::{env, net::SocketAddr};
 use tokio::signal;
 use tower_governor::{
-    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorError,
+    GovernorLayer,
 };
 use tower_http::{
     services::{ServeDir, ServeFile},
@@ -46,17 +50,56 @@ async fn main() -> anyhow::Result<()> {
         signing_key_source = signing_key_source.label(),
         "runtime signing key configured"
     );
-    let state = create_state(&database_url, signing_key).await?;
+    let admin_token_path =
+        env::var("ADMIN_TOKEN_FILE").unwrap_or_else(|_| "data/admin.token".into());
+    let (admin_token, admin_token_source) = load_or_generate_token(
+        std::path::Path::new(&admin_token_path),
+        env::var("ADMIN_TOKEN").ok().as_deref(),
+    )?;
+    info!(
+        admin_token_source = admin_token_source.label(),
+        admin_token_path, "admin access configured"
+    );
+    let inbound_token_path =
+        env::var("INBOUND_TOKEN_FILE").unwrap_or_else(|_| "data/inbound.token".into());
+    let (inbound_token, inbound_token_source) = load_or_generate_token(
+        std::path::Path::new(&inbound_token_path),
+        env::var("INBOUND_TOKEN").ok().as_deref(),
+    )?;
+    info!(
+        inbound_token_source = inbound_token_source.label(),
+        inbound_token_path, "inbound relay access configured"
+    );
+    let state = create_state(&database_url, signing_key, admin_token, inbound_token).await?;
     let static_dir = env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let index = format!("{static_dir}/index.html");
     let governor = GovernorConfigBuilder::default()
-        .per_millisecond(5)
-        .burst_size(300)
+        .per_millisecond(50)
+        .burst_size(40)
         .key_extractor(SmartIpKeyExtractor)
+        .use_headers()
         .finish()
         .expect("valid rate limit configuration");
     let app = Router::new()
-        .merge(api_router(state))
+        .route("/health", get(health))
+        .merge(api_router(state).layer(GovernorLayer::new(governor).error_handler(
+            |error: GovernorError| {
+                let message = match error {
+                    GovernorError::TooManyRequests { .. } => {
+                        "Request limit reached. Retry in one second."
+                    }
+                    _ => "The request could not be rate limited.",
+                };
+                let mut response =
+                    (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": message })))
+                        .into_response();
+                response.headers_mut().insert(
+                    header::RETRY_AFTER,
+                    HeaderValue::from_static("1"),
+                );
+                response
+            },
+        )))
         // Legal pages must also work for direct links, crawlers, and clients
         // without JavaScript; serve their complete static documents explicitly.
         .route_service(
@@ -67,13 +110,16 @@ async fn main() -> anyhow::Result<()> {
             "/terms",
             get_service(ServeFile::new(format!("{static_dir}/terms.html"))),
         )
-        .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index)))
-        .layer(GovernorLayer::new(governor))
+        .route_service("/demo", get_service(ServeFile::new(index)))
+        .fallback_service(
+            ServeDir::new(&static_dir).not_found_service(axum::routing::get(not_found)),
+        )
         .layer(middleware::from_fn(cache_policy))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("x-frame-options"), HeaderValue::from_static("DENY")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("referrer-policy"), HeaderValue::from_static("no-referrer")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("strict-transport-security"), HeaderValue::from_static("max-age=63072000; includeSubDomains")))
-        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), HeaderValue::from_static("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.sociobot.in")));
+        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), HeaderValue::from_static("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.sociobot.in; frame-ancestors 'none'")));
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "8080".into())
         .parse()
@@ -88,6 +134,13 @@ async fn main() -> anyhow::Result<()> {
     .with_graceful_shutdown(shutdown())
     .await?;
     Ok(())
+}
+
+async fn not_found() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        Html(include_str!("../frontend/static/404.html")),
+    )
 }
 
 async fn cache_policy(request: Request, next: Next) -> Response {

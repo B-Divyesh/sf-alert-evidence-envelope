@@ -1,10 +1,51 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Privacy — Alert Evidence Envelope</title><link rel="stylesheet" href="/legal.css" /></head>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="How Alert Evidence Envelope stores route metadata, secrets, demo data, and license tokens." />
+  <meta name="theme-color" content="#f3f0e5" />
+  <link rel="canonical" href="https://alert-evidence-envelope.sociobot.in/privacy" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://alert-evidence-envelope.sociobot.in/privacy" />
+  <meta property="og:title" content="Privacy — Alert Evidence Envelope" />
+  <meta property="og:description" content="How Alert Evidence Envelope handles route metadata, secrets, demo data, and license tokens." />
+  <meta property="og:image" content="https://alert-evidence-envelope.sociobot.in/assets/social-card.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Privacy — Alert Evidence Envelope" />
+  <meta name="twitter:description" content="How Alert Evidence Envelope handles route metadata, secrets, demo data, and license tokens." />
+  <meta name="twitter:image" content="https://alert-evidence-envelope.sociobot.in/assets/social-card.jpg" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/legal.css" />
+  <title>Privacy — Alert Evidence Envelope</title>
+</head>
 <body>
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header"><a class="brand" href="/">Alert Evidence<br /><em>Envelope</em></a><nav aria-label="Primary navigation"><a href="/">Back to product</a></nav></header>
-<main id="main"><article class="legal"><p class="eyebrow">FIELD NOTE · LEGAL 01</p><h1>Privacy, by boundary.</h1><p class="lede">The self-hosted core is designed to transform incident data without retaining raw alert bodies or raw fetched logs.</p><h2>What the relay stores</h2><p>SQLite stores channel configuration and a 20-entry delivery ledger: envelope ID, service label, delivery state, query fingerprint, time, item count, and byte count. It does not store raw inbound payloads, evidence excerpts, upstream tokens, destination tokens, or license tokens.</p><h2>Where secrets live</h2><p>Upstream and destination bearer tokens, admin access, and the signing key come from environment variables. Destination and source URLs may be stored in the local SQLite configuration. Browser license tokens and paid policy presets remain in your browser’s local storage.</p><h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification contacts Sociobot when a license is present, at most once per day. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p><h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them. For purchase records and refunds, contact Sociobot as merchant of record.</p><p class="updated">Effective 27 August 2026</p></article></main>
-<footer><p>Alert Evidence Envelope · A portable, least-privilege incident artifact.</p></footer>
+<main id="main"><article class="legal">
+  <p class="eyebrow">Privacy notice</p>
+  <h1>How this relay handles data</h1>
+  <p class="lede">The self-hosted core transforms incident data without retaining raw alert bodies or fetched logs.</p>
+  <h2>What the relay stores</h2>
+  <p>SQLite stores channel settings and the latest 20 delivery records.</p>
+  <p>Each record contains an envelope ID, service, state, query fingerprint, time, item count, and byte count.</p>
+  <p>The relay does not store inbound bodies, evidence excerpts, bearer tokens, or license tokens.</p>
+  <h2>Where secrets live</h2>
+  <p>The relay reads configured secrets from its environment or protected files on the server.</p>
+  <p>Source and destination URLs may be stored in SQLite. License tokens and paid presets remain in your browser.</p>
+  <h2>How the demo is separated</h2>
+  <p>Demo workspaces live in server memory for up to 24 hours. They cannot read or change the protected route.</p>
+  <h2>Network requests</h2>
+  <p>The relay contacts only endpoints configured by its operator.</p>
+  <p>License verification contacts Sociobot when a license is present. The browser checks at most once each day.</p>
+  <p>This site uses no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
+  <h2>Control and deletion</h2>
+  <p>The operator controls SQLite and browser storage. Remove the database or clear site data to delete them.</p>
+  <p>For purchase records and refunds, contact Sociobot as merchant of record.</p>
+  <p class="updated">Effective 30 August 2026</p>
+</article></main>
+<footer><p>Alert Evidence Envelope · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · Built by Param Factory · <span data-build>Build unavailable</span></p></footer>
+<script src="/build.js" defer></script>
 </body>
 </html>

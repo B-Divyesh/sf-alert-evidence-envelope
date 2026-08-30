@@ -1,18 +1,23 @@
 # Alert Evidence Envelope
 
-Alert Evidence Envelope is a self-hosted webhook transformer for on-call engineers and automation consumers. It turns an alert into a bounded, recursively redacted evidence excerpt, adds an HMAC signature and query fingerprint, and forwards it to Slack, an email gateway, or a JSON webhook. Responders can identify the service, error signature, and first-seen time without another authenticated dashboard lookup.
+Send bounded incident evidence with a webhook alert.
 
-It does **not** evaluate alerts, manage incidents, retain raw payloads, or summarize with an LLM.
+This self-hosted transformer is for on-call engineers and webhook consumers. It redacts evidence, applies caps, signs the envelope, and forwards it.
+
+[Try it with sample data](https://alert-evidence-envelope.sociobot.in/demo). The demo runs in an isolated, 24-hour workspace and does not change the protected route.
+
+The relay does not evaluate alerts, manage incidents, retain raw payloads, or summarize with a language model.
 
 ## How the route works
 
-1. `POST /api/v1/relay/primary` receives vendor-neutral JSON (maximum 256 KB).
-2. Evidence is read from a configured JSON pointer, or fetched from one fixed HTTPS source with `q` and `limit` query parameters. The alert cannot select the source host.
-3. Key names in the channel redaction policy are recursively replaced with `[REDACTED]`.
-4. Item and serialized byte caps are enforced. The envelope exposes whether it was truncated.
-5. The source/query fingerprint and envelope HMAC are attached, then the result is forwarded. A supported provider signature header is passed to the destination as `x-original-provider-signature`.
+1. `POST /api/v1/relay/primary` accepts vendor-neutral JSON up to 256 KB.
+2. The relay reads embedded evidence or queries one fixed HTTPS source.
+3. It replaces configured sensitive keys with `[REDACTED]`, including nested keys.
+4. It enforces item and byte caps before delivery.
+5. It adds a query fingerprint and HMAC-SHA256 signature.
+6. It forwards supported provider signatures as `x-original-provider-signature`.
 
-SQLite stores channel configuration and delivery metadata. It never stores the inbound body or evidence. Upstream/destination bearer credentials and the envelope signing key are environment-only.
+SQLite stores route settings and the latest 20 delivery metadata rows. It does not store inbound bodies or evidence excerpts.
 
 ## Run locally
 
@@ -21,91 +26,96 @@ Requirements: Node 22+, Rust 1.98+, and SQLite support.
 ```sh
 npm ci
 npm run build
-ENVELOPE_SIGNING_KEY='replace-with-at-least-32-random-bytes' cargo run
+PORT=8080 cargo run
 ```
 
-Open `http://localhost:8080`. For split frontend/backend development, run `cargo run` and `npm run dev` in separate terminals; Vite proxies API requests to port 8080.
+Open `http://localhost:8080`. The first boot creates three protected files:
+
+- `data/envelope-signing.key` signs envelopes.
+- `data/admin.token` authorizes route settings, preview, and history.
+- `data/inbound.token` authorizes incoming alert traffic.
+
+Each file has mode 600. Environment variables can supply values instead.
+
+Enter the admin token in the route builder before loading or saving settings. Alert providers must send `x-envelope-token` with the inbound token.
+
+```sh
+curl -fsS http://localhost:8080/api/v1/relay/primary \
+  -H 'content-type: application/json' \
+  -H "x-envelope-token: $(<data/inbound.token)" \
+  -H 'x-signature: original-provider-signature' \
+  --data @alert.json
+```
+
+With no destination, the relay returns the signed envelope and records delivery metadata.
 
 ### Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP listener |
-| `DATABASE_URL` | `sqlite:data/envelopes.db?mode=rwc` | Local metadata/config database |
+| `DATABASE_URL` | `sqlite:data/envelopes.db?mode=rwc` | Metadata and route database |
 | `STATIC_DIR` | `dist` | Built frontend directory |
-| `ENVELOPE_SIGNING_KEY` | unset | Optional 32-byte-minimum HMAC-SHA256 key override; otherwise a CSPRNG key is generated once and persisted locally |
-| `SIGNING_KEY_FILE` | `data/envelope-signing.key` | Persistent generated-key path (container default: `/data/envelope-signing.key`) |
-| `ADMIN_TOKEN` | unset | Optional bearer token protecting config, preview, and history routes |
-| `INBOUND_TOKEN` | unset | Optional `x-envelope-token` required on incoming relay requests |
-| `UPSTREAM_BEARER_TOKEN` | unset | Short-lived bearer token for the fixed evidence source |
-| `DESTINATION_URL` | unset | Environment override for the channel destination URL |
-| `DESTINATION_BEARER_TOKEN` | unset | Optional destination bearer token |
+| `ENVELOPE_SIGNING_KEY` | generated | Optional HMAC key override of at least 32 bytes |
+| `SIGNING_KEY_FILE` | `data/envelope-signing.key` | Persisted generated signing key |
+| `ADMIN_TOKEN` | generated | Optional admin token override of at least 32 characters |
+| `ADMIN_TOKEN_FILE` | `data/admin.token` | Persisted generated admin token |
+| `INBOUND_TOKEN` | generated | Optional inbound token override of at least 32 characters |
+| `INBOUND_TOKEN_FILE` | `data/inbound.token` | Persisted generated inbound token |
+| `UPSTREAM_BEARER_TOKEN` | unset | Credential for the fixed evidence source |
+| `DESTINATION_URL` | unset | Destination URL override |
+| `DESTINATION_BEARER_TOKEN` | unset | Destination bearer token |
 | `RUST_LOG` | service/tower info | Structured log filter |
 
-If `ADMIN_TOKEN` is enabled, enter it in the route builder; it remains in memory only. In automation, send `Authorization: Bearer …` to config/history/preview. Set `INBOUND_TOKEN` when the alert provider can send a custom `x-envelope-token` header, and use an ingress allowlist as an additional production boundary.
+The server logs whether each secret was generated, persisted, or supplied. It never logs secret values.
 
-## Alert shape
+## Request limits
 
-Every relevant location is configurable with RFC 6901 JSON pointers. The default accepts:
+Every `/api/v1` endpoint uses the first `X-Forwarded-For` address as its client key. It falls back to the socket address.
 
-```json
-{
-  "service": "checkout-api",
-  "error": "payment authorization timed out",
-  "startsAt": "2026-08-27T14:32:08Z",
-  "query": "service=checkout-api level=error",
-  "evidence": [
-    { "timestamp": "2026-08-27T14:31:41Z", "message": "gateway timeout", "email": "redact-me@example.com" }
-  ]
-}
-```
+Each client receives a 40-request burst. Capacity refills at 20 requests per second. Rejected requests return 429 with `Retry-After: 1`.
 
-```sh
-curl -fsS http://localhost:8080/api/v1/relay/primary \
-  -H 'content-type: application/json' \
-  -H 'x-signature: original-provider-signature' \
-  --data @alert.json
-```
-
-With no destination configured, the relay returns the signed envelope to the caller and records metadata as `created`. This makes the free self-hosted core useful without an outbound service.
-
-To verify a signature, save its `hmac-sha256=…` value, set the envelope's `signature` field to an empty string, serialize the fields in schema order as compact UTF-8 JSON, and compare an HMAC-SHA256 using `ENVELOPE_SIGNING_KEY` in constant time.
+`/health` is exempt so the deployment platform can probe the container.
 
 ## Test and build
 
 ```sh
-npm test          # type check, Rust tests, build, desktop + 390 px browser/axe tests
-npm run build     # reproducible frontend output in dist/
-cargo test --locked
+npm ci
+npm test
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+npm run build
 ```
 
-Playwright is pinned to 1.58.2 and uses Chromium. The Rust suite covers recursive redaction, bounds, endpoint validation, and an HTTP workflow across health/config/preview/relay/history. Browser tests cover the preview path, legal routes, semantics, console errors, mobile layout, and serious/critical axe findings.
+`npm test` runs Svelte checks, Rust unit and route tests, deployment-policy checks, a production build, and Playwright 1.58.2.
 
-Load smoke for a running release:
+Browser coverage runs on desktop and 390 px Chromium. It covers keyboard access, axe, legal pages, demo isolation, privacy, offline reload, metadata, security headers, and rate limits.
 
-```sh
-seq 1 500 | xargs -P 20 -I{} curl -fsS -o /dev/null http://localhost:8080/health
-```
-
-This is a 100+ requests/second health-route smoke on ordinary development hardware, not a capacity claim. Load-test configured upstreams and destinations separately without real incident data.
+Every product claim and its sandbox command is listed in [`.factory/claims.json`](.factory/claims.json). Demo details are in [`.factory/demo.md`](.factory/demo.md).
 
 ## Container deployment
 
 ```sh
-docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t alert-evidence-envelope .
-docker run --read-only --tmpfs /tmp -p 8080:8080 \
-  -v envelope-data:/data \
-  alert-evidence-envelope
+npm run deploy
+npm run verify:live-topology
 ```
 
-The multi-stage image runs as a non-root user and serves the Vite build and Axum API from one process. It starts with only `PORT`: on first boot it creates a random 256-bit signing key in `/data`, retains it for stable envelope verification, and logs only whether the key was generated, persisted, or supplied. `ENVELOPE_SIGNING_KEY` remains an optional 32-byte-minimum override. Pass the immutable 40-character commit with `--build-arg BUILD_SHA=<commit>`; it is compiled into `/health` as `build` and recorded in the image revision label. A local build without that argument reports the explicit `development` identity—never an empty value. The factory owns production deployment, DNS, TLS, and billing registration.
+The deployment command uses the factory container builder. It then mounts a product-specific Azure File share at `/data` and fixes scaling at one replica.
+
+One replica prevents SQLite state and in-process rate limits from splitting across workers. The mounted share retains settings, metadata, signing identity, and access tokens across revisions.
+
+The image runs as the non-root `envelope` user. It starts with only `PORT` supplied by the platform.
 
 ## Paid Field Kit
 
-The free core includes relay, redaction, size caps, signing, preview, export, and delivery. The optional $39 one-time Field Kit stores unlimited named redaction policies locally. Checkout and license verification use the Sociobot billing API; no payment provider is embedded and no provider product ID is hardcoded.
+The self-hosted relay and every safety control are free. The optional Field Kit is a $39 USD one-time purchase.
 
-See the deployed [Privacy](https://alert-evidence-envelope.sociobot.in/privacy) and [Terms](https://alert-evidence-envelope.sociobot.in/terms), the visual rationale in [`.factory/design.md`](.factory/design.md), and release verification in [`.factory/handoff.md`](.factory/handoff.md).
+It adds named redaction presets stored in this browser. Checkout and license verification use the Sociobot billing API.
+
+Sociobot/Dodo is the merchant of record. A refunded or invalid license removes paid controls without blocking the free relay.
+
+See [Privacy](https://alert-evidence-envelope.sociobot.in/privacy), [Terms](https://alert-evidence-envelope.sociobot.in/terms), and [the visual rationale](.factory/design.md).
 
 ## License
 
-MIT. Generated cartography is original to this product. Self-hosted Inter and Fraunces font files are distributed under the SIL Open Font License; see `THIRD_PARTY_NOTICES.md`.
+MIT. The generated cartography is original to this product. Inter and Fraunces are distributed under the SIL Open Font License.

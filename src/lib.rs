@@ -15,7 +15,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 use std::{
-    collections::HashSet, fs::OpenOptions, io::Write, path::Path as FsPath, sync::Arc,
+    collections::{HashMap, HashSet},
+    fs::OpenOptions,
+    io::Write,
+    path::Path as FsPath,
+    sync::Arc,
     time::Duration,
 };
 use subtle::ConstantTimeEq;
@@ -32,11 +36,79 @@ pub struct AppState {
     pub db: SqlitePool,
     pub client: Client,
     pub signing_key: Arc<Vec<u8>>,
-    pub admin_token: Option<Arc<String>>,
-    pub inbound_token: Option<Arc<String>>,
+    pub admin_token: Arc<String>,
+    pub inbound_token: Arc<String>,
     pub upstream_token: Option<Arc<String>>,
     pub destination_token: Option<Arc<String>>,
     pub destination_url_override: Option<Arc<String>>,
+    demo_sessions: Arc<tokio::sync::RwLock<HashMap<String, chrono::DateTime<Utc>>>>,
+}
+
+/// Loads an operator token or generates a persistent 256-bit hexadecimal token.
+/// The value is written with mode 600 and is never returned by an API or log.
+pub fn load_or_generate_token(
+    token_path: &FsPath,
+    supplied: Option<&str>,
+) -> anyhow::Result<(String, SigningKeySource)> {
+    if let Some(token) = supplied {
+        anyhow::ensure!(
+            token.len() >= 32,
+            "access tokens must contain at least 32 characters"
+        );
+        return Ok((token.to_owned(), SigningKeySource::Supplied));
+    }
+
+    match std::fs::read_to_string(token_path) {
+        Ok(token) => {
+            let token = token.trim().to_owned();
+            anyhow::ensure!(token.len() >= 64, "persisted access token is invalid");
+            return Ok((token, SigningKeySource::Persisted));
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(error)
+                .with_context(|| format!("read access token at {}", token_path.display()));
+        }
+        Err(_) => {}
+    }
+
+    let parent = token_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("access token path must have a parent directory"))?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("create access-token directory {}", parent.display()))?;
+    let mut random = [0_u8; 32];
+    getrandom::fill(&mut random).context("generate an access token")?;
+    let token = hex::encode(random);
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(token_path) {
+        Ok(mut file) => {
+            file.write_all(token.as_bytes())
+                .with_context(|| format!("write access token at {}", token_path.display()))?;
+            file.sync_all()
+                .with_context(|| format!("sync access token at {}", token_path.display()))?;
+            Ok((token, SigningKeySource::Generated))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let persisted = std::fs::read_to_string(token_path).with_context(|| {
+                format!(
+                    "read concurrently-created access token at {}",
+                    token_path.display()
+                )
+            })?;
+            let persisted = persisted.trim().to_owned();
+            anyhow::ensure!(persisted.len() >= 64, "persisted access token is invalid");
+            Ok((persisted, SigningKeySource::Persisted))
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("create access token at {}", token_path.display()))
+        }
+    }
 }
 
 /// Records whether the HMAC key was explicitly configured or safely recovered
@@ -205,13 +277,19 @@ pub struct RelayResult {
     pub envelope: EvidenceEnvelope,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct PreviewRequest {
     alert: Value,
     evidence: Option<Vec<Value>>,
     redact_fields: Option<Vec<String>>,
     max_items: Option<usize>,
     max_bytes: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct DemoSession {
+    id: String,
+    expires_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -229,8 +307,8 @@ struct DeliveryRecord {
 pub enum ApiError {
     #[error("{0}")]
     BadRequest(String),
-    #[error("configuration is not authorized")]
-    Unauthorized,
+    #[error("{0}")]
+    Unauthorized(String),
     #[error("channel was not found")]
     NotFound,
     #[error("upstream evidence could not be fetched: {0}")]
@@ -245,7 +323,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
-            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Upstream(_) => StatusCode::BAD_GATEWAY,
             Self::Delivery(_) => StatusCode::BAD_GATEWAY,
@@ -256,7 +334,12 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub async fn create_state(database_url: &str, signing_key: Vec<u8>) -> anyhow::Result<AppState> {
+pub async fn create_state(
+    database_url: &str,
+    signing_key: Vec<u8>,
+    admin_token: String,
+    inbound_token: String,
+) -> anyhow::Result<AppState> {
     let db = SqlitePoolOptions::new()
         .max_connections(5)
         .connect(database_url)
@@ -270,21 +353,30 @@ pub async fn create_state(database_url: &str, signing_key: Vec<u8>) -> anyhow::R
             .user_agent("alert-evidence-envelope/0.1")
             .build()?,
         signing_key: Arc::new(signing_key),
-        admin_token: std::env::var("ADMIN_TOKEN").ok().map(Arc::new),
-        inbound_token: std::env::var("INBOUND_TOKEN").ok().map(Arc::new),
+        admin_token: Arc::new(admin_token),
+        inbound_token: Arc::new(inbound_token),
         upstream_token: std::env::var("UPSTREAM_BEARER_TOKEN").ok().map(Arc::new),
         destination_token: std::env::var("DESTINATION_BEARER_TOKEN").ok().map(Arc::new),
         destination_url_override: std::env::var("DESTINATION_URL").ok().map(Arc::new),
+        demo_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     })
 }
 
 pub fn api_router(state: AppState) -> Router {
     Router::new()
-        .route("/health", get(health))
         .route("/api/v1/config", get(get_config).put(put_config))
         .route("/api/v1/history", get(history))
         .route("/api/v1/preview", post(preview))
         .route("/api/v1/relay/{channel}", post(relay))
+        .route("/api/v1/demo/sessions", post(create_demo_session))
+        .route(
+            "/api/v1/demo/sessions/{session}",
+            axum::routing::delete(delete_demo_session),
+        )
+        .route(
+            "/api/v1/demo/sessions/{session}/preview",
+            post(demo_preview),
+        )
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(262_144))
         .layer(CompressionLayer::new())
@@ -298,7 +390,7 @@ pub fn api_router(state: AppState) -> Router {
         ))
         .layer(SetResponseHeaderLayer::if_not_present(
             HeaderName::from_static("content-security-policy"),
-            HeaderValue::from_static("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.sociobot.in"),
+            HeaderValue::from_static("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.sociobot.in; frame-ancestors 'none'"),
         ))
         .layer(TraceLayer::new_for_http())
 }
@@ -342,7 +434,7 @@ fn build_identity(compiled_identity: Option<&'static str>) -> &'static str {
         .unwrap_or(DEVELOPMENT_BUILD_ID)
 }
 
-async fn health() -> Json<Value> {
+pub async fn health() -> Json<Value> {
     Json(json!({
         "status": "ok",
         "build": build_identity(option_env!("BUILD_SHA"))
@@ -350,18 +442,21 @@ async fn health() -> Json<Value> {
 }
 
 fn authorize(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
-    let Some(expected) = &state.admin_token else {
-        return Ok(());
-    };
     let supplied = headers
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
-    if supplied.as_bytes().ct_eq(expected.as_bytes()).into() {
+    if supplied
+        .as_bytes()
+        .ct_eq(state.admin_token.as_bytes())
+        .into()
+    {
         Ok(())
     } else {
-        Err(ApiError::Unauthorized)
+        Err(ApiError::Unauthorized(
+            "admin token required; read the persisted token on the relay host".into(),
+        ))
     }
 }
 
@@ -376,9 +471,11 @@ async fn get_config(
 async fn put_config(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(mut config): Json<ChannelConfig>,
+    body: Bytes,
 ) -> Result<Json<ChannelConfig>, ApiError> {
     authorize(&headers, &state)?;
+    let mut config: ChannelConfig = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::BadRequest("request body must be valid channel JSON".into()))?;
     config.id = "primary".into();
     validate_config(&config)?;
     sqlx::query("INSERT INTO channels (id, config, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at")
@@ -484,10 +581,71 @@ async fn history(
 async fn preview(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<PreviewRequest>,
+    body: Bytes,
 ) -> Result<Json<EvidenceEnvelope>, ApiError> {
     authorize(&headers, &state)?;
+    let request: PreviewRequest = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::BadRequest("request body must be valid preview JSON".into()))?;
     let mut config = load_config(&state.db, "primary").await?;
+    if let Some(fields) = request.redact_fields {
+        config.redact_fields = fields;
+    }
+    if let Some(cap) = request.max_items {
+        config.max_items = cap;
+    }
+    if let Some(cap) = request.max_bytes {
+        config.max_bytes = cap;
+    }
+    validate_config(&config)?;
+    let evidence = request
+        .evidence
+        .or_else(|| extract_evidence(&request.alert, &config.evidence_pointer))
+        .unwrap_or_default();
+    Ok(Json(build_envelope(
+        &request.alert,
+        evidence,
+        &config,
+        &state.signing_key,
+        false,
+    )?))
+}
+
+async fn create_demo_session(State(state): State<AppState>) -> Json<DemoSession> {
+    let now = Utc::now();
+    let expires_at = now + chrono::Duration::hours(24);
+    let id = Uuid::new_v4().to_string();
+    let mut sessions = state.demo_sessions.write().await;
+    sessions.retain(|_, expiry| *expiry > now);
+    sessions.insert(id.clone(), expires_at);
+    Json(DemoSession {
+        id,
+        expires_at: expires_at.to_rfc3339(),
+    })
+}
+
+async fn delete_demo_session(
+    State(state): State<AppState>,
+    Path(session): Path<String>,
+) -> StatusCode {
+    state.demo_sessions.write().await.remove(&session);
+    StatusCode::NO_CONTENT
+}
+
+async fn demo_preview(
+    State(state): State<AppState>,
+    Path(session): Path<String>,
+    body: Bytes,
+) -> Result<Json<EvidenceEnvelope>, ApiError> {
+    let now = Utc::now();
+    let mut sessions = state.demo_sessions.write().await;
+    sessions.retain(|_, expiry| *expiry > now);
+    if !sessions.contains_key(&session) {
+        return Err(ApiError::NotFound);
+    }
+    drop(sessions);
+    let request: PreviewRequest = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::BadRequest("request body must be valid preview JSON".into()))?;
+    let mut config = ChannelConfig::default();
     if let Some(fields) = request.redact_fields {
         config.redact_fields = fields;
     }
@@ -517,14 +675,14 @@ async fn relay(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(StatusCode, Json<RelayResult>), ApiError> {
-    if let Some(expected) = &state.inbound_token {
-        let supplied = headers
-            .get("x-envelope-token")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("");
-        if !bool::from(supplied.as_bytes().ct_eq(expected.as_bytes())) {
-            return Err(ApiError::Unauthorized);
-        }
+    let supplied = headers
+        .get("x-envelope-token")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if !bool::from(supplied.as_bytes().ct_eq(state.inbound_token.as_bytes())) {
+        return Err(ApiError::Unauthorized(
+            "inbound relay token required in x-envelope-token".into(),
+        ));
     }
     let config = load_config(&state.db, &channel).await?;
     if !config.enabled {
@@ -875,6 +1033,7 @@ mod tests {
 
     #[test]
     fn recursively_redacts_and_bounds_evidence() {
+        // @claim:bounded-redacted-signed
         let alert = json!({"service":"checkout", "error":"card declined", "startsAt":"2026-08-27T12:00:00Z", "query":"service=checkout"});
         let evidence = vec![
             json!({"message":"failed", "user":{"email":"a@example.com"}, "token":"secret"}),
@@ -954,6 +1113,25 @@ mod tests {
     }
 
     #[test]
+    fn access_tokens_are_generated_once_and_can_be_overridden() {
+        let directory = tempfile::tempdir().unwrap();
+        let token_path = directory.path().join("admin.token");
+
+        let (generated, source) = load_or_generate_token(&token_path, None).unwrap();
+        assert_eq!(source, SigningKeySource::Generated);
+        assert_eq!(generated.len(), 64);
+
+        let (persisted, source) = load_or_generate_token(&token_path, None).unwrap();
+        assert_eq!(source, SigningKeySource::Persisted);
+        assert_eq!(persisted, generated);
+
+        let supplied = "z".repeat(32);
+        let (loaded, source) = load_or_generate_token(&token_path, Some(&supplied)).unwrap();
+        assert_eq!(source, SigningKeySource::Supplied);
+        assert_eq!(loaded, supplied);
+    }
+
+    #[test]
     fn signing_key_rejects_short_values() {
         let directory = tempfile::tempdir().unwrap();
         assert!(
@@ -962,7 +1140,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_routes_complete_a_local_relay_workflow() {
+    async fn claim_provider_signature_is_preserved_across_relay() {
+        // @claim:provider-signature
         type Capture =
             Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<(HeaderMap, Value)>>>>;
         async fn capture(
@@ -989,10 +1168,14 @@ mod tests {
         let state = create_state(
             &database_url,
             b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
         )
         .await
         .unwrap();
-        let app = api_router(state);
+        let app = Router::new()
+            .route("/health", get(health))
+            .merge(api_router(state));
 
         let health = app
             .clone()
@@ -1011,6 +1194,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/config")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1027,6 +1214,10 @@ mod tests {
             .method("PUT")
             .uri("/api/v1/config")
             .header("content-type", "application/json")
+            .header(
+                "authorization",
+                "Bearer test-admin-token-with-at-least-32-characters",
+            )
             .body(Body::from(serde_json::to_vec(&updated).unwrap()))
             .unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
@@ -1042,6 +1233,10 @@ mod tests {
                     .method("POST")
                     .uri("/api/v1/preview")
                     .header("content-type", "application/json")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
                     .body(Body::from(preview_body))
                     .unwrap(),
             )
@@ -1061,6 +1256,10 @@ mod tests {
                     .uri("/api/v1/relay/primary")
                     .header("content-type", "application/json")
                     .header("x-signature", "provider-sig")
+                    .header(
+                        "x-envelope-token",
+                        "test-inbound-token-with-at-least-32-characters",
+                    )
                     .body(Body::from(relay_body))
                     .unwrap(),
             )
@@ -1090,6 +1289,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/history")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1101,5 +1304,240 @@ mod tests {
         assert_eq!(history_json.as_array().unwrap().len(), 1);
 
         sink_task.abort();
+    }
+
+    #[tokio::test]
+    async fn unauthorized_requests_are_rejected_before_body_parsing() {
+        // @claim:protected-real-apis
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite:{}", file.path().display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state);
+
+        for (method, uri) in [
+            ("GET", "/api/v1/config"),
+            ("GET", "/api/v1/history"),
+            ("PUT", "/api/v1/config"),
+            ("POST", "/api/v1/preview"),
+            ("POST", "/api/v1/relay/primary"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from("{"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {uri}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn demo_session_is_ephemeral_and_cannot_reach_real_history() {
+        // @claim:isolated-demo
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite:{}", file.path().display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state);
+        let session = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/demo/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session.status(), StatusCode::OK);
+        let bytes = to_bytes(session.into_body(), 10_000).await.unwrap();
+        let session: Value = serde_json::from_slice(&bytes).unwrap();
+        let id = session["id"].as_str().unwrap();
+
+        let sample = json!({
+            "alert": {
+                "service": "checkout-api",
+                "error": "payment authorization timed out",
+                "startsAt": "2026-08-27T14:32:08Z",
+                "evidence": [{"email": "customer@example.com", "token": "secret"}]
+            }
+        });
+        let preview = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/demo/sessions/{id}/preview"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(sample.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(preview.status(), StatusCode::OK);
+        let bytes = to_bytes(preview.into_body(), 100_000).await.unwrap();
+        let preview: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(preview["summary"]["service"], "checkout-api");
+        assert_eq!(preview["evidence"][0]["email"], "[REDACTED]");
+
+        let history = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/history")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(history.into_body(), 10_000).await.unwrap();
+        let history: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(history, json!([]));
+    }
+
+    #[tokio::test]
+    async fn claim_raw_payload_is_not_persisted() {
+        // @claim:raw-not-retained
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = directory.path().join("metadata.db");
+        let database_url = format!("sqlite:{}?mode=rwc", database_path.display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let db = state.db.clone();
+        let app = api_router(state);
+        let private_email = "private-marker-83@example.test";
+        let private_token = "secret-marker-a91f";
+        let relay_body = json!({
+            "service": "retention-check",
+            "error": "private error marker 714",
+            "startsAt": "2026-08-30T00:00:00Z",
+            "evidence": [{"message": "private evidence marker 552", "email": private_email, "token": private_token}]
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/relay/primary")
+                    .header("content-type", "application/json")
+                    .header(
+                        "x-envelope-token",
+                        "test-inbound-token-with-at-least-32-characters",
+                    )
+                    .body(Body::from(relay_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let stored: (String, String) = sqlx::query_as(
+            "SELECT service, fingerprint FROM deliveries WHERE service = 'retention-check'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(stored.0, "retention-check");
+        assert_eq!(stored.1.len(), 16);
+        db.close().await;
+        let database_bytes = std::fs::read(database_path).unwrap();
+        for forbidden in [
+            private_email,
+            private_token,
+            "private evidence marker 552",
+            "private error marker 714",
+        ] {
+            assert!(!database_bytes
+                .windows(forbidden.len())
+                .any(|window| window == forbidden.as_bytes()));
+        }
+    }
+
+    #[tokio::test]
+    async fn claim_history_keeps_only_the_latest_twenty_records() {
+        // @claim:history-limit
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite:{}", file.path().display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state);
+        for index in 0..25 {
+            let body = json!({
+                "service": format!("service-{index}"),
+                "error": "bounded failure",
+                "startsAt": format!("2026-08-30T00:00:{index:02}Z"),
+                "evidence": [{"message": "safe"}]
+            });
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/relay/primary")
+                        .header("content-type", "application/json")
+                        .header(
+                            "x-envelope-token",
+                            "test-inbound-token-with-at-least-32-characters",
+                        )
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+        }
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/history")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(response.into_body(), 100_000).await.unwrap();
+        let history: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(history.as_array().unwrap().len(), 20);
     }
 }
