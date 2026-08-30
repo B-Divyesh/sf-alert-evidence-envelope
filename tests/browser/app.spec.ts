@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const seriousAxe = async (page: Page) => {
   const results = await new AxeBuilder({ page })
@@ -217,6 +218,19 @@ test('serves discovery metadata, icons, and a designed 404', async ({ page, requ
   expect(response?.status()).toBe(404);
   await expect(page).toHaveTitle('Page not found — Alert Evidence Envelope');
   await expect(page.locator('h1')).toHaveText('We could not find this page');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://alert-evidence-envelope.sociobot.in/404');
+  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://alert-evidence-envelope.sociobot.in/404');
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f3f0e5');
+});
+
+test('moves focus and announces the new route after in-app navigation', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Demo' }).click();
+  await expect(page).toHaveURL(/\/demo$/);
+  await expect(page.locator('h1')).toBeFocused();
+  await expect(page.locator('[aria-live="polite"]').first()).toContainText('Inspect a sample evidence envelope');
+  await page.goBack();
+  await expect(page.locator('h1')).toBeFocused();
 });
 
 test('keeps navigation touch targets at least 44px high', async ({ page }) => {
@@ -281,11 +295,70 @@ test('@claim:local-policy-presets keeps named redaction presets on this device',
 });
 
 test('restores a Field Kit license and strips returned tokens from the URL', async ({ page }) => {
-  await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify**', async (route) => {
+  await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ valid: true, reason: 'ok' }) });
   });
   await page.goto('/?license=returned-test-license');
   await expect(page).toHaveURL('/');
   await expect(page.getByText('Field Kit unlocked')).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('sb_license:alert-evidence-envelope'))).toBe('returned-test-license');
+});
+
+test('@claim:mobile-demo-result shows the transformed envelope above the fold', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/demo');
+  await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
+  for (const text of ['checkout-api', 'payment authorization timed out', '[REDACTED]']) {
+    const box = await page.getByText(text, { exact: text === 'checkout-api' || text === 'payment authorization timed out' }).first().boundingBox();
+    expect(box?.y, text).toBeLessThan(844);
+  }
+});
+
+test('@claim:license-transport uses an authorization header and never a token URL', async ({ page }) => {
+  let seenUrl = ''; let authorization = '';
+  await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify', async (route) => {
+    seenUrl = route.request().url(); authorization = route.request().headers().authorization || '';
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ valid: false, reason: 'invalid' }) });
+  });
+  await page.goto('/?license=fixture-license-token');
+  await expect(page.getByText('License no longer active')).toBeVisible();
+  expect(seenUrl).not.toContain('license=');
+  expect(authorization).toBe('Bearer fixture-license-token');
+});
+
+test('@claim:license-throttle waits after a failed verification attempt', async ({ page }) => {
+  let attempts = 0;
+  await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify', async (route) => { attempts += 1; await route.abort(); });
+  await page.addInitScript(() => localStorage.setItem('sb_license:alert-evidence-envelope', 'fixture-license'));
+  await page.goto('/'); await page.reload();
+  expect(attempts).toBe(1);
+});
+
+test('@claim:free-core keeps the preview and export action free', async ({ page }) => {
+  const billingRequests: string[] = [];
+  page.on('request', (request) => { if (request.url().includes('api.sociobot.in')) billingRequests.push(request.url()); });
+  await page.goto('/demo');
+  await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy envelope JSON' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Buy the Field Kit' })).not.toBeVisible();
+  expect(billingRequests).toEqual([]);
+});
+
+test('@claim:license-revocation hides Field Kit controls but leaves free preview', async ({ page }) => {
+  await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ valid: false, reason: 'revoked' }) });
+  });
+  await page.goto('/?license=revoked-fixture');
+  await expect(page.getByText('License no longer active')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save current redaction policy' })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Build signed preview' })).toBeVisible();
+});
+
+test('@claim:provenance-license renders reviewed provenance', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.provenance')).toContainText('generated for this product on 2026-08-27');
+  const license = readFileSync('LICENSE', 'utf8');
+  expect(license).toContain('MIT License');
+  const metadata = readFileSync('assets/src/evidence-terrain.json', 'utf8');
+  expect(metadata).toContain('2026-08-27');
 });

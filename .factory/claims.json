@@ -1,100 +1,22 @@
 [
-  {
-    "id": "demo-envelope",
-    "claim": "The one-click demo builds a bounded, recursively redacted, HMAC-signed envelope with service, error, and first-seen fields.",
-    "where": "Landing first screen, demo, README",
-    "test": "npm run test:claims -- --grep @claim:demo-envelope",
-    "sandbox": "Fresh browser context at /; click Try it with sample data; assert /demo, summary fields, redactions, and a 64-hex HMAC signature."
-  },
-  {
-    "id": "bounded-redacted-signed",
-    "claim": "Evidence is recursively redacted, limited by item and byte caps, and signed with HMAC-SHA256.",
-    "where": "How it works, route builder, README",
-    "test": "cargo test recursively_redacts_and_bounds_evidence --locked",
-    "sandbox": "Construct two nested evidence records with private fields and a one-item cap; assert truncation and redaction, then recompute and verify the HMAC over the unsigned envelope."
-  },
-  {
-    "id": "fixed-query-source",
-    "claim": "The relay fetches evidence only from the configured source and sends only the alert query plus the fixed item limit.",
-    "where": "How it works, route builder, README",
-    "test": "cargo test configured_source_receives_only_the_alert_query_and_fixed_limit --locked",
-    "sandbox": "Use a local capture source and an alert containing a hostile source URL; assert the configured source receives one GET with only q and limit parameters."
-  },
-  {
-    "id": "isolated-demo",
-    "claim": "Demo data never enters protected route history and the workspace expires after 24 hours.",
-    "where": "Landing facts, demo banner, privacy, README",
-    "test": "cargo test demo_session_is_ephemeral_and_cannot_reach_real_history --locked",
-    "sandbox": "Temporary SQLite database; assert the returned and stored expiry is 24 hours, reject and delete an expired session, preview sample data, and assert protected history stays empty."
-  },
-  {
-    "id": "raw-not-retained",
-    "claim": "SQLite does not retain inbound alert bodies or evidence excerpts.",
-    "where": "Privacy, delivery history, README",
-    "test": "cargo test claim_raw_payload_is_not_persisted --locked",
-    "sandbox": "Temporary SQLite database; relay unique private markers, close the pool, and assert none occur in the database bytes."
-  },
-  {
-    "id": "provider-signature",
-    "claim": "A supported provider signature is passed to the destination with the signed envelope.",
-    "where": "How it works, README",
-    "test": "cargo test claim_provider_signature_is_preserved_across_relay --locked",
-    "sandbox": "Temporary database and local capture server; relay a signed alert and assert both original and envelope signature headers arrive."
-  },
-  {
-    "id": "history-limit",
-    "claim": "Protected history returns only the latest 20 delivery metadata records.",
-    "where": "Delivery history, privacy, README",
-    "test": "cargo test claim_history_keeps_only_the_latest_twenty_records --locked",
-    "sandbox": "Temporary database; accept 25 authenticated relays and assert history returns exactly 20 rows."
-  },
-  {
-    "id": "protected-real-apis",
-    "claim": "Route configuration, preview, history, and inbound relay traffic require separate server credentials.",
-    "where": "Route builder, privacy, README",
-    "test": "cargo test unauthorized_requests_are_rejected_before_body_parsing --locked",
-    "sandbox": "Temporary server state; send unauthenticated malformed requests to every real-data endpoint and assert 401 before parsing."
-  },
-  {
-    "id": "no-tracking",
-    "claim": "The normal demo uses no analytics, advertising, third-party scripts, or hosted fonts.",
-    "where": "Landing facts, privacy, README",
-    "test": "npm run test:claims -- --grep @claim:no-tracking",
-    "sandbox": "Fresh browser context; record the complete demo request log and assert every request uses the product origin."
-  },
-  {
-    "id": "offline-demo",
-    "claim": "The last sample envelope reloads offline after one online demo visit.",
-    "where": "README, demo documentation",
-    "test": "npm run test:claims -- --grep @claim:offline-demo",
-    "sandbox": "Dedicated fresh browser context; load /demo, wait for the service worker, switch offline, reload, and assert the sample result remains."
-  },
-  {
-    "id": "rate-limit",
-    "claim": "API clients receive a 40-request burst, then 20 requests per second, keyed by the first forwarded client IP.",
-    "where": "README",
-    "test": "npm run test:claims -- --grep @claim:rate-limit",
-    "sandbox": "Send 60 concurrent API requests from one forwarded IP; assert 429 with Retry-After 1 and an independent IP remains available."
-  },
-  {
-    "id": "local-policy-presets",
-    "claim": "A valid Field Kit license adds named redaction presets stored only in this browser.",
-    "where": "Field Kit, privacy, README",
-    "test": "npm run test:claims -- --grep @claim:local-policy-presets",
-    "sandbox": "Fresh browser context with a recorded valid cached verdict; save a named policy, inspect localStorage, reload, and apply the preserved fields."
-  },
-  {
-    "id": "field-kit-purchase",
-    "claim": "The Field Kit page shows a $39 USD one-time price and uses the official Sociobot product checkout URL.",
-    "where": "Landing facts, Field Kit, terms, README",
-    "test": "npm run test:claims -- --grep @claim:field-kit-purchase",
-    "sandbox": "Read the rendered price and buy link; assert the link uses the official api.sociobot.in product checkout endpoint without depending on shared checkout availability."
-  },
-  {
-    "id": "durable-deployment",
-    "claim": "The deployment uses one application replica and persists committed route state on a durable Azure File share at /data.",
-    "where": "README, deployment helper",
-    "test": "cargo test durable_sqlite_restores_committed_route_state --locked && cargo test demo_create_then_preview_survives_a_fresh_database_connection --locked && cargo test durable_data_sqlite_uses_the_single_process_vfs --locked && npm run test:deployment-policy && npm run verify:live-topology",
-    "sandbox": "Reopen the same SQLite file and recover committed route and demo-session state; assert /data uses the single-process VFS; then query only the scoped app for one running replica, /data, matching live identity, and 20 fresh-connection previews."
-  }
+  {"id":"demo-envelope","claim":"The one-click demo builds a bounded, recursively redacted, HMAC-signed envelope with service, error, and first-seen fields.","where":"Landing first screen, demo, README","test":"npm run test:claims -- --grep @claim:demo-envelope","sandbox":"Fresh browser context at /; click the sample action and inspect the completed envelope."},
+  {"id":"mobile-demo-result","claim":"The completed sample result is visible in the first 390 by 844 pixel demo viewport.","where":"Demo","test":"npm run test:claims -- --grep @claim:mobile-demo-result","sandbox":"Fresh 390 by 844 browser context at /demo; assert summary, redaction, and signed status intersect the viewport."},
+  {"id":"bounded-redacted-signed","claim":"Evidence is recursively redacted, limited by item and byte caps, and signed with HMAC-SHA256.","where":"How it works, route builder, README","test":"cargo test recursively_redacts_and_bounds_evidence --locked","sandbox":"Nested private fields and a one-item cap; recompute the HMAC over the unsigned envelope."},
+  {"id":"query-fingerprint","claim":"The query fingerprint is derived from both the configured source and alert query.","where":"How it works, README","test":"cargo test claim_query_fingerprint_uses_source_and_query --locked","sandbox":"Fixed inputs produce a deterministic digest; changing source or query changes it."},
+  {"id":"fixed-query-source","claim":"The relay fetches evidence only from the configured source and sends only the alert query plus the fixed item limit.","where":"How it works, route builder, README","test":"cargo test configured_source_receives_only_the_alert_query_and_fixed_limit --locked","sandbox":"Capture the upstream request after an alert supplies a hostile source URL."},
+  {"id":"isolated-demo","claim":"Demo data never enters protected route history and the workspace expires after 24 hours.","where":"Landing facts, demo banner, privacy, README","test":"cargo test demo_session_is_ephemeral_and_cannot_reach_real_history --locked","sandbox":"Temporary SQLite; inspect expiry, preview sample data, and protected history."},
+  {"id":"raw-not-retained","claim":"SQLite does not retain inbound alert bodies or evidence excerpts.","where":"Privacy, delivery history, README","test":"cargo test claim_raw_payload_is_not_persisted --locked","sandbox":"Relay unique private markers then inspect closed SQLite bytes."},
+  {"id":"protected-real-apis","claim":"Route configuration, preview, history, and inbound relay traffic require server credentials.","where":"Route builder, privacy, README","test":"cargo test unauthorized_requests_are_rejected_before_body_parsing --locked","sandbox":"Send unauthenticated malformed requests to every protected endpoint."},
+  {"id":"credential-storage","claim":"Generated signing, admin, and inbound credentials use protected server files; browser route settings never include them.","where":"Route builder, README","test":"cargo test claim_generated_credentials_are_protected --locked","sandbox":"Temporary paths; assert file modes, supplied overrides, and no token in a configuration response."},
+  {"id":"preview-no-history","claim":"A protected preview does not add delivery history.","where":"Preview, delivery history","test":"cargo test claim_preview_does_not_record_history --locked","sandbox":"Run an authenticated preview and compare history before and after."},
+  {"id":"per-route-isolation","claim":"Each delivery route has its own inbound URL, destination, and redaction list.","where":"Route builder, README","test":"cargo test claim_routes_keep_independent_policies --locked","sandbox":"Create two protected routes, relay each, and compare redacted fields and channel IDs."},
+  {"id":"no-tracking","claim":"The normal demo uses no analytics, advertising, third-party scripts, or hosted fonts.","where":"Landing facts, privacy, README","test":"npm run test:claims -- --grep @claim:no-tracking","sandbox":"Record complete demo request log and assert every request uses the product origin."},
+  {"id":"offline-demo","claim":"The last sample envelope reloads offline after one online demo visit.","where":"README, demo documentation","test":"npm run test:claims -- --grep @claim:offline-demo","sandbox":"Dedicated context visits demo, waits for the service worker, then reloads offline."},
+  {"id":"license-transport","claim":"License tokens stay in browser storage and are sent to Sociobot only in an authorization header; presets stay local.","where":"Privacy, Field Kit","test":"npm run test:claims -- --grep @claim:license-transport","sandbox":"Intercept verification, inspect URL/header, and inspect local storage after saving a preset."},
+  {"id":"license-throttle","claim":"The browser waits 24 hours after each license verification attempt.","where":"Privacy","test":"npm run test:claims -- --grep @claim:license-throttle","sandbox":"Recorded failed verification with clock-controlled reloads."},
+  {"id":"free-core","claim":"Redaction, signing, preview, export, and route safety controls work without a Field Kit license.","where":"Landing, terms, README","test":"npm run test:claims -- --grep @claim:free-core","sandbox":"Fresh unlicensed demo verifies redaction, signature and copy/export action with no billing call."},
+  {"id":"field-kit-purchase","claim":"The Field Kit page shows a $39 USD one-time price and uses the official Sociobot product checkout URL.","where":"Landing facts, Field Kit, terms, README","test":"npm run test:claims -- --grep @claim:field-kit-purchase","sandbox":"Read price and checkout URL without depending on checkout availability."},
+  {"id":"license-revocation","claim":"An invalid license removes only Field Kit controls and preserves the free relay.","where":"Terms, Field Kit","test":"npm run test:claims -- --grep @claim:license-revocation","sandbox":"Recorded invalid verdict and visible free preview controls."},
+  {"id":"provenance-license","claim":"The cartography was generated for this product on 2026-08-27 and this repository is MIT licensed.","where":"Footer, README","test":"npm run test:claims -- --grep @claim:provenance-license","sandbox":"Inspect asset prompt metadata, license, font notice and rendered footer."},
+  {"id":"rate-limit","claim":"API clients receive a 40-request burst, then 20 requests per second, keyed by the first forwarded client IP.","where":"README","test":"npm run test:claims -- --grep @claim:rate-limit","sandbox":"Burst 60 requests and inspect 429 Retry-After plus an independent IP."}
 ]

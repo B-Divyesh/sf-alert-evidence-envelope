@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   type Config = {
     id: string; name: string; source_url: string; destination_url: string;
@@ -36,6 +36,7 @@
     time_pointer: '/startsAt', redact_fields: ['authorization', 'password', 'token', 'email', 'cookie'],
     max_items: 20, max_bytes: 32768, enabled: true,
   };
+  let channels: Config[] = [];
   let redactText = config.redact_fields.join(', ');
   let adminToken = '';
   let configState: 'locked' | 'loading' | 'ready' | 'saving' | 'saved' | 'error' = 'locked';
@@ -53,10 +54,12 @@
   let presetName = '';
   let presets: Preset[] = [];
   let demoSession = '';
+  let routeAnnouncement = '';
 
   onMount(() => {
     updateMetadata();
     void loadBuildIdentity();
+    window.addEventListener('popstate', () => void setRoute(location.pathname, false));
     if (path === '/demo') {
       const cached = localStorage.getItem(demoPreviewKey);
       if (cached) {
@@ -81,6 +84,7 @@
     window.addEventListener('online', updateOnline);
     window.addEventListener('offline', updateOnline);
     return () => {
+      window.removeEventListener('popstate', () => void setRoute(location.pathname, false));
       window.removeEventListener('online', updateOnline);
       window.removeEventListener('offline', updateOnline);
     };
@@ -90,11 +94,30 @@
 
   function updateMetadata() {
     const canonical = `https://alert-evidence-envelope.sociobot.in${path === '/demo' ? '/demo' : '/'}`;
-    const title = path === '/demo' ? 'Demo — Alert Evidence Envelope' : 'Alert Evidence Envelope — safe incident evidence';
+    const title = path === '/demo' ? 'Demo — Alert Evidence Envelope' : 'Alert Evidence Envelope — add evidence to alerts';
+    document.title = title;
     document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.setAttribute('href', canonical);
     document.querySelector<HTMLMetaElement>('meta[property="og:url"]')?.setAttribute('content', canonical);
     document.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.setAttribute('content', title);
     document.querySelector<HTMLMetaElement>('meta[name="twitter:title"]')?.setAttribute('content', title);
+  }
+
+  async function setRoute(next: string, push = true) {
+    if (next === path) return;
+    if (push) history.pushState({}, '', next);
+    path = next;
+    updateMetadata();
+    if (path === '/demo') await startDemo(false);
+    await tick();
+    const heading = document.querySelector<HTMLElement>('main h1');
+    if (heading) { heading.tabIndex = -1; heading.focus(); routeAnnouncement = heading.textContent?.trim() || ''; }
+    window.scrollTo(0, 0);
+  }
+
+  function navigate(event: MouseEvent, next: string, exitsDemo = false) {
+    event.preventDefault();
+    if (exitsDemo) leaveDemo();
+    void setRoute(next);
   }
 
   async function loadBuildIdentity() {
@@ -124,6 +147,7 @@
     try {
       const loaded = await api('/api/v1/config');
       config = { ...loaded, source_url: loaded.source_url || '', destination_url: loaded.destination_url || '' };
+      channels = await api('/api/v1/channels');
       redactText = config.redact_fields.join(', ');
       configState = 'ready'; configMessage = 'Route loaded from this relay';
       deliveries = await api('/api/v1/history');
@@ -131,6 +155,32 @@
       configState = 'error';
       configMessage = error instanceof Error ? error.message : 'Could not reach the relay';
     }
+  }
+
+  async function selectRoute(id: string) {
+    try {
+      const loaded = await api(`/api/v1/channels/${id}`);
+      config = { ...loaded, source_url: loaded.source_url || '', destination_url: loaded.destination_url || '' };
+      redactText = config.redact_fields.join(', ');
+      configMessage = `Editing ${config.name}. Each route has its own inbound URL and redaction list.`;
+    } catch (error) { configMessage = error instanceof Error ? error.message : 'Could not load the route'; }
+  }
+
+  async function createRoute() {
+    try {
+      const created = await api('/api/v1/channels', { method: 'POST', body: JSON.stringify({ ...config, id: '', name: 'New delivery route' }) });
+      channels = [...channels, created];
+      await selectRoute(created.id);
+    } catch (error) { configMessage = error instanceof Error ? error.message : 'Could not create a route'; }
+  }
+
+  async function deleteRoute() {
+    if (config.id === 'primary') return;
+    try {
+      await api(`/api/v1/channels/${config.id}`, { method: 'DELETE' });
+      channels = channels.filter((channel) => channel.id !== config.id);
+      await selectRoute('primary');
+    } catch (error) { configMessage = error instanceof Error ? error.message : 'Could not delete the route'; }
   }
 
   async function saveConfig(event: SubmitEvent) {
@@ -142,8 +192,10 @@
       redact_fields: redactText.split(',').map((v) => v.trim()).filter(Boolean),
     };
     try {
-      const saved = await api('/api/v1/config', { method: 'PUT', body: JSON.stringify(outgoing) });
+      const endpoint = config.id === 'primary' ? '/api/v1/config' : `/api/v1/channels/${config.id}`;
+      const saved = await api(endpoint, { method: 'PUT', body: JSON.stringify(outgoing) });
       config = { ...saved, source_url: saved.source_url || '', destination_url: saved.destination_url || '' };
+      channels = channels.map((channel) => channel.id === saved.id ? saved : channel);
       redactText = config.redact_fields.join(', ');
       configState = 'saved'; configMessage = 'Route saved. New alerts use this policy.';
     } catch (error) {
@@ -218,17 +270,19 @@
 
   async function verifyLicense(force = false) {
     license = localStorage.getItem(licenseKey) || '';
-    const cached = JSON.parse(localStorage.getItem(verdictKey) || 'null') as { valid: boolean; checkedAt: number } | null;
+    const cached = JSON.parse(localStorage.getItem(verdictKey) || 'null') as { valid: boolean; checkedAt?: number; attemptedAt?: number } | null;
     if (cached?.valid) { unlocked = true; licenseMessage = 'Field Kit unlocked'; }
     if (!license) return;
-    if (!force && cached && Date.now() - cached.checkedAt < 86_400_000) {
+    if (!force && cached && Date.now() - (cached.attemptedAt || cached.checkedAt || 0) < 86_400_000) {
       unlocked = cached.valid; return;
     }
     try {
-      const response = await fetch(`${billingBase}/products/${slug}/verify?license=${encodeURIComponent(license)}`);
+      const attemptedAt = Date.now();
+      localStorage.setItem(verdictKey, JSON.stringify({ valid: cached?.valid === true, checkedAt: cached?.checkedAt, attemptedAt }));
+      const response = await fetch(`${billingBase}/products/${slug}/verify`, { headers: { authorization: `Bearer ${license}` } });
       const result = await response.json();
       unlocked = result.valid === true;
-      localStorage.setItem(verdictKey, JSON.stringify({ valid: unlocked, checkedAt: Date.now() }));
+      localStorage.setItem(verdictKey, JSON.stringify({ valid: unlocked, checkedAt: attemptedAt, attemptedAt }));
       licenseMessage = unlocked ? 'Field Kit unlocked' : 'License no longer active';
     } catch {
       licenseMessage = unlocked ? 'Field Kit unlocked · verification pending' : 'Could not verify while offline';
@@ -254,8 +308,10 @@
 </script>
 
 <svelte:head>
-  <title>{path === '/privacy' ? 'Privacy — Alert Evidence Envelope' : path === '/terms' ? 'Terms — Alert Evidence Envelope' : path === '/demo' ? 'Demo — Alert Evidence Envelope' : 'Alert Evidence Envelope — safe incident evidence'}</title>
+  <title>{path === '/privacy' ? 'Privacy — Alert Evidence Envelope' : path === '/terms' ? 'Terms — Alert Evidence Envelope' : path === '/demo' ? 'Demo — Alert Evidence Envelope' : 'Alert Evidence Envelope — add evidence to alerts'}</title>
 </svelte:head>
+
+<p class="sr-status" aria-live="polite">{routeAnnouncement}</p>
 
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="site-header">
@@ -265,8 +321,8 @@
   </a>
   <nav aria-label="Primary navigation">
     {#if path === '/'}
-      <a href="/demo">Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
-    {:else if path === '/demo'}<a href="/" onclick={leaveDemo}>Start for real</a><a href="/privacy">Privacy</a>
+    <a href="/demo" onclick={(event) => navigate(event, '/demo')}>Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
+    {:else if path === '/demo'}<a href="/" onclick={(event) => navigate(event, '/', true)}>Start for real</a><a href="/privacy">Privacy</a>
     {:else}<a href="/">Back to product</a>{/if}
   </nav>
   <span class:offline={!online} class="network"><i></i>{online ? 'Browser online' : 'Browser offline'}</span>
@@ -277,7 +333,7 @@
     <strong>Demo — sample data, nothing is saved</strong>
     <span>Isolated workspace expires after 24 hours.</span>
     <button type="button" onclick={() => startDemo(true)}>Reset demo</button>
-    <a href="/" onclick={leaveDemo}>Start for real</a>
+    <a href="/" onclick={(event) => navigate(event, '/', true)}>Start for real</a>
   </aside>
 {/if}
 
@@ -306,7 +362,7 @@
 {#if path === '/'}
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy">
-      <p class="eyebrow">Webhook evidence transformer</p>
+      <p class="eyebrow">Add evidence to webhook alerts</p>
       <h1 id="hero-title">Send safe evidence with every alert</h1>
       <p class="lede">For on-call engineers and webhook consumers who need incident context without another dashboard login.</p>
       <div class="hero-actions"><a class="button primary" href="/demo">Try it with sample data</a><a class="button secondary" href="#configure">Configure your route</a></div>
@@ -322,16 +378,17 @@
   <section class="route" aria-labelledby="route-title">
     <div class="section-heading"><p class="eyebrow">How it works</p><h2 id="route-title">Four checks before delivery</h2></div>
     <ol class="route-stages">
-      <li><span>01</span><h3>Bound</h3><p>Use a fixed source and item/byte caps. Alert data cannot choose an arbitrary endpoint.</p></li>
-      <li><span>02</span><h3>Redact</h3><p>Remove sensitive keys recursively with a channel-specific policy before forwarding.</p></li>
-      <li><span>03</span><h3>Fingerprint</h3><p>Hash the configured query and source so responders know what shaped the excerpt.</p></li>
-      <li><span>04</span><h3>Seal</h3><p>Sign the final JSON envelope and preserve the provider signature in transit when present.</p></li>
+      <li><span>01</span><h3>Limit the evidence</h3><p>Use one fixed source. Limit the record count and envelope size.</p></li>
+      <li><span>02</span><h3>Remove sensitive fields</h3><p>Remove sensitive keys recursively with this route’s redaction list before forwarding.</p></li>
+      <li><span>03</span><h3>Record the source and query</h3><p>Hash the configured query and source so responders know what shaped the excerpt.</p></li>
+      <li><span>04</span><h3>Sign the envelope</h3><p>Sign the final JSON envelope and preserve the provider signature in transit when present.</p></li>
     </ol>
   </section>
 
   <section id="configure" class="workspace" aria-labelledby="configure-title">
-    <div class="workspace-intro"><p class="eyebrow">Protected route settings</p><h2 id="configure-title">Configure the alert route</h2><p>Route settings live in SQLite. The server keeps credentials outside the browser.</p></div>
+    <div class="workspace-intro"><p class="eyebrow">Protected route settings</p><h2 id="configure-title">Configure delivery routes</h2><p>Each route stores its own redaction list and destination. Server credentials stay outside the browser.</p></div>
     <div class="state-strip" class:error={configState === 'error'} class:success={configState === 'saved'} aria-live="polite"><span></span>{configMessage}</div>
+    {#if channels.length}<div class="route-list" aria-label="Delivery routes">{#each channels as channel}<button class:active={channel.id === config.id} type="button" onclick={() => selectRoute(channel.id)}>{channel.name}<small>{channel.id}</small></button>{/each}<button type="button" onclick={createRoute}>Create route</button>{#if config.id !== 'primary'}<button type="button" onclick={deleteRoute}>Delete this route</button>{/if}</div>{/if}
     <form onsubmit={saveConfig}>
       <fieldset><legend><b>1</b> Name and state</legend>
         <div class="form-grid"><label>Route name<input bind:value={config.name} required maxlength="80" /></label><label class="toggle"><input type="checkbox" bind:checked={config.enabled} /><span>Accept incoming alerts</span></label></div>
@@ -347,7 +404,7 @@
         <div class="form-grid"><label>Destination type<select bind:value={config.destination_kind}><option value="json">Automation webhook</option><option value="slack">Slack incoming webhook</option><option value="email-webhook">Email gateway webhook</option></select></label><label>Destination URL <span>optional if set by environment</span><input type="url" bind:value={config.destination_url} placeholder="https://hooks.example/…" /></label><label>Service JSON pointer<input bind:value={config.service_pointer} required pattern="/.*" /></label><label>Error JSON pointer<input bind:value={config.error_pointer} required pattern="/.*" /></label><label>First-seen JSON pointer<input bind:value={config.time_pointer} required pattern="/.*" /></label><label>Admin token <span>read from the relay host</span><input type="password" bind:value={adminToken} autocomplete="off" /></label></div>
         <button class="copy load-route" type="button" onclick={loadConfig} disabled={configState === 'loading'}>{configState === 'loading' ? 'Loading route…' : 'Load protected route'}</button>
       </fieldset>
-      <div class="form-actions"><button class="button primary" type="submit" disabled={configState === 'saving'}>{configState === 'saving' ? 'Saving route…' : 'Save route'}</button><code>POST {typeof location === 'undefined' ? '' : location.origin}/api/v1/relay/primary</code><button class="copy" type="button" onclick={() => copy(`${location.origin}/api/v1/relay/primary`, 'Relay URL copied')}>Copy URL</button><small>Incoming requests must send the server’s <code>x-envelope-token</code>.</small></div>
+      <div class="form-actions"><button class="button primary" type="submit" disabled={configState === 'saving'}>{configState === 'saving' ? 'Saving route…' : 'Save route'}</button><code>POST {typeof location === 'undefined' ? '' : location.origin}/api/v1/relay/{config.id}</code><button class="copy" type="button" onclick={() => copy(`${location.origin}/api/v1/relay/${config.id}`, 'Relay URL copied')}>Copy relay URL</button><small>Incoming requests must send the server’s <code>x-envelope-token</code>.</small></div>
     </form>
     <p class="sr-status" aria-live="polite">{copyMessage}</p>
   </section>
@@ -356,14 +413,15 @@
   <section id="test" class="test-bench" aria-labelledby="test-title">
     <div class="section-heading"><p class="eyebrow">Safe preview</p>{#if path === '/demo'}<h1 id="test-title">Inspect a sample evidence envelope</h1><p>The sample runs automatically in an isolated workspace. It never changes the protected route.</p>{:else}<h2 id="test-title">Inspect an envelope before delivery</h2><p>Preview applies the live route’s bounds, redaction, fingerprint, and signature. It does not add delivery history.</p>{/if}</div>
     <div class="bench-grid">
-      <div><label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build safe preview'}</button></div>
+      <div><label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build signed preview'}</button></div>
       <div class="envelope-output" aria-busy={previewState === 'loading'}>
-        {#if previewState === 'idle'}<div class="empty"><svg aria-hidden="true" viewBox="0 0 64 64"><path d="M9 18h46v32H9zM10 20l22 17 22-17"/><path d="M24 12c5-5 11-5 16 0"/></svg><h3>No envelope yet</h3><p>Use the sample as-is or paste a real-shaped, sanitized alert.</p></div>
+        {#if previewState === 'idle'}<div class="empty"><svg aria-hidden="true" viewBox="0 0 64 64"><path d="M9 18h46v32H9zM10 20l22 17 22-17"/><path d="M24 12c5-5 11-5 16 0"/></svg><h3>No envelope yet</h3><p>Use the sample as-is or paste a realistic alert with sensitive values removed.</p></div>
         {:else if previewState === 'loading'}<div class="empty"><div class="loader" aria-hidden="true"></div><h3>Building the envelope</h3><p>Bounding → redacting → fingerprinting → signing</p></div>
         {:else if previewState === 'error'}<div class="empty error-panel"><b>Preview stopped</b><p>{previewMessage}</p><button type="button" onclick={() => sample = sampleAlert}>Restore valid sample</button></div>
         {:else}
           <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
           <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
+          <p class="redaction-result"><b>Sensitive fields</b> [REDACTED]</p>
           <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
           <p class="fingerprint"><span>Query fingerprint</span><code>{preview.query_fingerprint}</code></p>
           <details><summary>Inspect signed JSON</summary><!-- svelte-ignore a11y_no_noninteractive_tabindex (the bounded scroll region must accept keyboard focus) --><pre tabindex="0" aria-label="Signed evidence envelope JSON">{JSON.stringify(preview, null, 2)}</pre></details>
@@ -376,7 +434,7 @@
 
 {#if path === '/'}
   <section class="ledger" aria-labelledby="ledger-title">
-    <div class="section-heading"><p class="eyebrow">Last 20 deliveries</p><h2 id="ledger-title">Recent delivery metadata</h2><p>The ledger stores metadata only. Raw alerts and evidence are absent.</p></div>
+    <div class="section-heading"><p class="eyebrow">Last 20 deliveries</p><h2 id="ledger-title">Recent delivery metadata</h2><p>Delivery history stores metadata only. Raw alerts and evidence are absent.</p></div>
     {#if deliveries.length}
       <div class="table-wrap"><table><thead><tr><th>Created</th><th>Service</th><th>Status</th><th>Evidence</th><th>Fingerprint</th></tr></thead><tbody>{#each deliveries as item}<tr><td data-label="Created">{formatDate(item.created_at)}</td><td data-label="Service">{item.service}</td><td data-label="Status"><span class="status-dot"></span>{item.status}</td><td data-label="Evidence">{item.evidence_items} · {formatBytes(item.evidence_bytes)}</td><td data-label="Fingerprint"><code>{item.fingerprint}</code></td></tr>{/each}</tbody></table></div>
     {:else}<div class="ledger-empty"><span>∅</span><div><h3>No delivery metadata yet</h3><p>Send a live alert to the relay URL. Preview runs never appear here.</p></div></div>{/if}
@@ -403,5 +461,5 @@
 <footer>
   <div><a class="brand footer-brand" href="/"><svg aria-hidden="true" viewBox="0 0 48 48"><path d="M7 12h34v24H7z"/><path d="m8 14 16 12 16-12"/></svg><span>Alert Evidence Envelope</span></a><p>Send bounded incident evidence with a webhook alert.</p></div>
   <div class="footer-links"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/B-Divyesh/sf-alert-evidence-envelope">Source (external)</a></div>
-  <p class="provenance">Built by Param Factory · Build {buildId.slice(0, 12)} · Original generated cartography · MIT licensed</p>
+  <p class="provenance">Built by Param Factory · Build {buildId.slice(0, 12)} · Cartography generated for this product on 2026-08-27 · MIT licensed</p>
 </footer>

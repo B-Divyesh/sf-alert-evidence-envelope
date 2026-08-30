@@ -387,6 +387,11 @@ fn sqlite_connect_options(database_url: &str) -> anyhow::Result<SqliteConnectOpt
 pub fn api_router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/config", get(get_config).put(put_config))
+        .route("/api/v1/channels", get(list_channels).post(create_channel))
+        .route(
+            "/api/v1/channels/{channel}",
+            get(get_channel).put(put_channel).delete(delete_channel),
+        )
         .route("/api/v1/history", get(history))
         .route("/api/v1/preview", post(preview))
         .route("/api/v1/relay/{channel}", post(relay))
@@ -516,6 +521,107 @@ async fn put_config(
         .await
         .map_err(|e| ApiError::Internal(e.into()))?;
     Ok(Json(config))
+}
+
+/// The legacy /config endpoint remains the protected primary-route shortcut.
+/// New installations can create independently configured delivery routes here.
+async fn list_channels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ChannelConfig>>, ApiError> {
+    authorize(&headers, &state)?;
+    let rows = sqlx::query("SELECT config FROM channels ORDER BY updated_at ASC")
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
+    rows.into_iter()
+        .map(|row| {
+            serde_json::from_str(row.get("config")).map_err(|e| ApiError::Internal(e.into()))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Json)
+}
+
+async fn get_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel): Path<String>,
+) -> Result<Json<ChannelConfig>, ApiError> {
+    authorize(&headers, &state)?;
+    Ok(Json(load_config(&state.db, &channel).await?))
+}
+
+async fn create_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<ChannelConfig>, ApiError> {
+    authorize(&headers, &state)?;
+    let mut config: ChannelConfig = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::BadRequest("request body must be valid channel JSON".into()))?;
+    config.id = format!("route-{}", &Uuid::new_v4().simple().to_string()[..12]);
+    if config.name == ChannelConfig::default().name {
+        config.name = "New delivery route".into();
+    }
+    save_channel(&state, &config).await?;
+    Ok(Json(config))
+}
+
+async fn put_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel): Path<String>,
+    body: Bytes,
+) -> Result<Json<ChannelConfig>, ApiError> {
+    authorize(&headers, &state)?;
+    if channel == "primary" {
+        let mut config: ChannelConfig = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::BadRequest("request body must be valid channel JSON".into()))?;
+        config.id = "primary".into();
+        save_channel(&state, &config).await?;
+        return Ok(Json(config));
+    }
+    let mut config: ChannelConfig = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::BadRequest("request body must be valid channel JSON".into()))?;
+    if !channel.starts_with("route-") {
+        return Err(ApiError::NotFound);
+    }
+    config.id = channel;
+    save_channel(&state, &config).await?;
+    Ok(Json(config))
+}
+
+async fn delete_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(channel): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    authorize(&headers, &state)?;
+    if channel == "primary" {
+        return Err(ApiError::BadRequest(
+            "the primary route cannot be deleted".into(),
+        ));
+    }
+    let _persistence = state.persistence_lock.lock().await;
+    let deleted = sqlx::query("DELETE FROM channels WHERE id = ?")
+        .bind(&channel)
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?
+        .rows_affected();
+    if deleted == 0 {
+        return Err(ApiError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn save_channel(state: &AppState, config: &ChannelConfig) -> Result<(), ApiError> {
+    validate_config(config)?;
+    let _persistence = state.persistence_lock.lock().await;
+    sqlx::query("INSERT INTO channels (id, config, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at")
+        .bind(&config.id).bind(serde_json::to_string(config).map_err(|e| ApiError::Internal(e.into()))?)
+        .bind(Utc::now().to_rfc3339()).execute(&state.db).await.map_err(|e| ApiError::Internal(e.into()))?;
+    Ok(())
 }
 
 fn validate_config(config: &ChannelConfig) -> Result<(), ApiError> {
@@ -1949,5 +2055,159 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(retained, 20);
+    }
+
+    #[test]
+    fn claim_query_fingerprint_uses_source_and_query() {
+        // @claim:query-fingerprint
+        let alert = json!({"service":"api", "error":"timeout", "startsAt":"2026-08-30T00:00:00Z", "query":"service=api", "evidence":[{"message":"x"}]});
+        let config = ChannelConfig {
+            source_url: Some("https://logs.example/query".into()),
+            ..Default::default()
+        };
+        let one = build_envelope(
+            &alert,
+            vec![json!({"message":"x"})],
+            &config,
+            b"test-signing-key-with-at-least-32-bytes",
+            false,
+        )
+        .unwrap();
+        let changed_query = build_envelope(&json!({"service":"api", "error":"timeout", "startsAt":"2026-08-30T00:00:00Z", "query":"service=worker", "evidence":[{"message":"x"}]}), vec![json!({"message":"x"})], &config, b"test-signing-key-with-at-least-32-bytes", false).unwrap();
+        let source_config = ChannelConfig {
+            source_url: Some("https://other.example/query".into()),
+            ..config
+        };
+        let changed_source = build_envelope(
+            &alert,
+            vec![json!({"message":"x"})],
+            &source_config,
+            b"test-signing-key-with-at-least-32-bytes",
+            false,
+        )
+        .unwrap();
+        assert_ne!(one.query_fingerprint, changed_query.query_fingerprint);
+        assert_ne!(one.query_fingerprint, changed_source.query_fingerprint);
+        assert_eq!(one.query_fingerprint.len(), 16);
+    }
+
+    #[tokio::test]
+    async fn claim_preview_does_not_record_history() {
+        // @claim:preview-no-history
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let state = create_state(
+            &format!("sqlite:{}", file.path().display()),
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state.clone());
+        let response = app.oneshot(Request::builder().method("POST").uri("/api/v1/preview").header("authorization", "Bearer test-admin-token-with-at-least-32-characters").header("content-type", "application/json").body(Body::from(json!({"alert":{"service":"preview", "error":"only", "startsAt":"2026-08-30T00:00:00Z", "evidence":[]}}).to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM deliveries")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn claim_routes_keep_independent_policies() {
+        // @claim:per-route-isolation
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let state = create_state(
+            &format!("sqlite:{}", file.path().display()),
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state.clone());
+        let auth = "Bearer test-admin-token-with-at-least-32-characters";
+        let one = ChannelConfig {
+            id: "ignored".into(),
+            name: "Slack".into(),
+            redact_fields: vec!["email".into()],
+            ..Default::default()
+        };
+        let two = ChannelConfig {
+            id: "ignored".into(),
+            name: "Automation".into(),
+            redact_fields: vec!["token".into()],
+            ..Default::default()
+        };
+        let create = |value: ChannelConfig| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/channels")
+                .header("authorization", auth)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&value).unwrap()))
+                .unwrap()
+        };
+        let created_one = app.clone().oneshot(create(one)).await.unwrap();
+        let created_two = app.clone().oneshot(create(two)).await.unwrap();
+        let a: ChannelConfig =
+            serde_json::from_slice(&to_bytes(created_one.into_body(), 100_000).await.unwrap())
+                .unwrap();
+        let b: ChannelConfig =
+            serde_json::from_slice(&to_bytes(created_two.into_body(), 100_000).await.unwrap())
+                .unwrap();
+        assert_ne!(a.id, b.id);
+        assert_eq!(a.redact_fields, vec!["email"]);
+        assert_eq!(b.redact_fields, vec!["token"]);
+        let alert = json!({"service":"routes", "error":"test", "startsAt":"2026-08-30T00:00:00Z", "evidence":[{"email":"e", "token":"t"}]}).to_string();
+        for channel in [&a.id, &b.id] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/relay/{channel}"))
+                        .header(
+                            "x-envelope-token",
+                            "test-inbound-token-with-at-least-32-characters",
+                        )
+                        .header("content-type", "application/json")
+                        .body(Body::from(alert.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+        }
+        let channels: Vec<String> =
+            sqlx::query_scalar("SELECT channel_id FROM deliveries ORDER BY created_at")
+                .fetch_all(&state.db)
+                .await
+                .unwrap();
+        assert!(channels.contains(&a.id) && channels.contains(&b.id));
+    }
+
+    #[test]
+    fn claim_generated_credentials_are_protected() {
+        // @claim:credential-storage
+        let directory = tempfile::tempdir().unwrap();
+        let signing = directory.path().join("signing.key");
+        let admin = directory.path().join("admin.token");
+        let inbound = directory.path().join("inbound.token");
+        load_or_generate_signing_key(&signing, None).unwrap();
+        load_or_generate_token(&admin, None).unwrap();
+        load_or_generate_token(&inbound, None).unwrap();
+        #[cfg(unix)]
+        for path in [&signing, &admin, &inbound] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let (override_token, source) =
+            load_or_generate_token(&admin, Some("x1234567890123456789012345678901")).unwrap();
+        assert_eq!(source, SigningKeySource::Supplied);
+        assert!(override_token.starts_with('x'));
     }
 }

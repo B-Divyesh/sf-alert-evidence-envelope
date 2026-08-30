@@ -33,16 +33,16 @@
   <p>The relay does not store inbound bodies, evidence excerpts, bearer tokens, or license tokens.</p>
   <h2>Where secrets live</h2>
   <p>The relay reads configured secrets from its environment or protected files on the server.</p>
-  <p>Source and destination URLs may be stored in SQLite. License tokens and paid presets remain in your browser.</p>
+  <p>Source and destination URLs may be stored in SQLite. License tokens and paid presets are stored in your browser.</p>
   <h2>How the demo is separated</h2>
   <p>SQLite stores each demo session ID and expiry time for up to 24 hours. It never stores the sample alert or envelope.</p>
   <h2>Network requests</h2>
   <p>The relay contacts only endpoints configured by its operator.</p>
-  <p>License verification contacts Sociobot when a license is present. The browser checks at most once each day.</p>
+  <p>License verification sends the stored token to Sociobot in an authorization header. The token is never put in a URL. The browser waits 24 hours after each attempt.</p>
   <p>This site uses no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
   <h2>Control and deletion</h2>
   <p>The operator controls SQLite and browser storage. Remove the database or clear site data to delete them.</p>
-  <p>For purchase records and refunds, contact Sociobot as merchant of record.</p>
+  <p>Clear browser site data to remove a stored license token and local presets.</p>
   <p class="updated">Effective 30 August 2026</p>
 </article></main>
 <footer><p>Alert Evidence Envelope · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · Built by Param Factory · <span data-build>Build unavailable</span></p></footer>
