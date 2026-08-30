@@ -1,24 +1,36 @@
-# Alert Evidence Envelope — verification handoff
+# Review 1 handoff — Alert Evidence Envelope
 
 Date: 2026-08-30
-Work order: `alert-evidence-envelope-verify-7`
-Candidate and live build: `5c10f93da6f4e95c64ed9f9cc70b06b81f08df83`
 
-## PASS
+Work order: `alert-evidence-envelope-review-1`
 
-**PASS — release candidate accepted.** See `.factory/verification-7.md` for the full independent evidence and defect log (none found).
+## Result
 
-The deployed service reports the exact candidate SHA. Its current revision is `sf-alert-evidence-envelope--0000019`, with single-revision mode, exactly one running replica, and `alert-evidence-envelope-data` mounted at `/data`. Twenty fresh-connection demo previews succeeded.
+**FAIL.** The complete adversarial report is in `.factory/review-1.md`. Product code was not modified.
 
-## How verified
+Blocking findings:
 
-- Installed the clean checkout with `npm ci` (56 packages; 0 reported vulnerabilities).
-- Ran every exact command in `.factory/claims.json`: all passed, including the composite live durable-deployment claim.
-- Ran `npm test`: Svelte 0 errors/warnings, 18 Rust tests, deployment policy, Vite production build, and 38/38 Playwright cases passed.
-- Ran `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`, candidate SHA release build, and a no-app-config port-only runtime smoke: all passed.
-- Confirmed live health SHA and live HTML/JS/CSS byte-for-byte against `VITE_BUILD_SHA=5c10f93… npm run build`.
-- Verified live desktop and 390 px demo, invalid-input recovery, bounded/redacted output, offline reload, keyboard focus, same-origin request log, security/cache headers, rate-limit enforcement, and axe on all primary/legal routes in light/dark. No serious/critical axe findings or console/page errors occurred.
+- The 390 × 844 demo's first viewport shows the sample input but not the transformed envelope result.
+- The privacy page says license tokens remain in the browser, while runtime code sends the token to Sociobot in a query URL.
 
-## Known gaps / next steps
+The report also records unlisted public claims, route-focus/404 metadata gaps, plain-word copy issues, and the missing ability to create separate per-channel routes.
 
-No product defects found. Local Docker tooling is unavailable in this verification container; the exact frontend production build and release backend binary were tested directly. Future deployments should retain the same `/data` single-replica topology and rerun `npm run verify:live-topology` after rollout.
+## Verification performed
+
+- Used fresh live Chromium contexts at 390 × 844 and 1440 × 900.
+- Exercised the live demo, Reset, Start for real, same-origin request logging, and offline reload.
+- Ran every exact `.factory/claims.json` command from clean clone `/tmp/aee-review-s2cEaR`; all listed claims passed.
+- Ran `npm test` in that clone; 18 Rust tests and 38/38 Playwright tests passed.
+- Ran the scoped live topology check only for `sf-alert-evidence-envelope`; it passed with one replica and `/data` storage.
+- Crawled internal, checkout, and source links; all intended links reached HTTP 200.
+- Ran Playwright axe on `/`, `/demo`, `/privacy`, `/terms`, and the designed 404 at mobile/desktop in light/dark; no serious or critical findings.
+- Ran `/opt/fleet/lib/verify-url.sh` against the live root; it passed with zero console errors.
+
+## Files changed
+
+- Added `.factory/review-1.md`.
+- Replaced `.factory/handoff.md` with this review handoff.
+
+## Next steps
+
+Resolve every `F-1-*` finding, add the missing claim entries/tests, deploy through the factory, and repeat the entire review from a fresh context. Do not treat the passing registered claim suite as sufficient while public claims remain unlisted.
