@@ -10,4 +10,5 @@ assert.match(deploy, /mountPath: "\/data"/);
 assert.match(deploy, /verify-live-topology\.sh/);
 assert.match(dockerfile, /USER envelope/);
 assert.match(dockerfile, /DATABASE_URL=sqlite:\/data\/envelopes\.db\?mode=rwc/);
+assert.match(dockerfile, /COPY frontend\/static\/404\.html \.\/frontend\/static\/404\.html/);
 console.log('PASS @claim:durable-deployment: one replica, Azure File /data mount, non-root runtime');

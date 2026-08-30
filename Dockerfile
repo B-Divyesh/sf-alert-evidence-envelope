@@ -13,6 +13,8 @@ WORKDIR /app
 ARG BUILD_SHA=development
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
+# The binary embeds the branded 404 response so it can retain a true 404 status.
+COPY frontend/static/404.html ./frontend/static/404.html
 RUN BUILD_SHA="${BUILD_SHA:-development}" cargo build --release --locked
 
 FROM alpine:3.21
