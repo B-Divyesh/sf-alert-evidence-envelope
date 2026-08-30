@@ -6,6 +6,7 @@ const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8
 
 assert.match(deploy, /minReplicas: 1, maxReplicas: 1/);
 assert.match(deploy, /activeRevisionsMode:\"Single\"/);
+assert.match(deploy, /del\(\.revisionSuffix\)/);
 assert.match(deploy, /storageType: "AzureFile"/);
 assert.match(deploy, /mountPath: "\/data"/);
 assert.match(deploy, /verify-live-topology\.sh/);
