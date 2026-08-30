@@ -5,6 +5,8 @@ const deploy = readFileSync(new URL('./deploy-durable-container.sh', import.meta
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 
 assert.match(deploy, /minReplicas: 1, maxReplicas: 1/);
+assert.match(deploy, /scale\.minReplicas == 1/);
+assert.match(deploy, /scale\.maxReplicas == 1/);
 assert.match(deploy, /activeRevisionsMode:\"Single\"/);
 assert.match(deploy, /\.revisionSuffix = null/);
 assert.match(deploy, /storageType: "AzureFile"/);

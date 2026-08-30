@@ -17,7 +17,8 @@ ready_revision=$(jq -er '.properties.latestReadyRevisionName' <<<"$topology")
 [ "$revision" = "$ready_revision" ] || fail "latest revision is not ready"
 jq -e --arg storage "$storage_name" '
   .properties.configuration.activeRevisionsMode == "Single"
-  and .properties.template.scale == {minReplicas: 1, maxReplicas: 1}
+  and .properties.template.scale.minReplicas == 1
+  and .properties.template.scale.maxReplicas == 1
   and any(.properties.template.volumes[]?; .name == "envelope-data" and .storageType == "AzureFile" and .storageName == $storage)
   and any(.properties.template.containers[]?; .name == "app" and any(.volumeMounts[]?; .volumeName == "envelope-data" and .mountPath == "/data"))
 ' >/dev/null <<<"$topology" || fail "expected one replica with the Azure File volume mounted at /data"
