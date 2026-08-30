@@ -13,12 +13,16 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
+    Row, SqlitePool,
+};
 use std::{
     collections::{HashMap, HashSet},
     fs::OpenOptions,
     io::Write,
     path::Path as FsPath,
+    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -340,9 +344,15 @@ pub async fn create_state(
     admin_token: String,
     inbound_token: String,
 ) -> anyhow::Result<AppState> {
+    // Azure Files is an SMB filesystem. A single SQLite connection avoids
+    // cross-connection lock propagation on that durable mount; the timeout
+    // absorbs short lock-release delays during revision startup.
+    let options = SqliteConnectOptions::from_str(database_url)?
+        .journal_mode(SqliteJournalMode::Delete)
+        .busy_timeout(Duration::from_secs(30));
     let db = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect(database_url)
+        .max_connections(1)
+        .connect_with(options)
         .await?;
     migrate(&db).await?;
     seed_default(&db).await?;
@@ -1482,6 +1492,37 @@ mod tests {
                 .windows(forbidden.len())
                 .any(|window| window == forbidden.as_bytes()));
         }
+    }
+
+    #[tokio::test]
+    async fn persistent_sqlite_serializes_connections_for_mounted_storage() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite:{}", file.path().display());
+        let state = create_state(
+            &database_url,
+            b"test-signing-key-with-at-least-32-bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+
+        let held = state.db.acquire().await.unwrap();
+        assert!(
+            state.db.try_acquire().is_none(),
+            "the persistent SQLite pool must expose only one connection"
+        );
+        drop(held);
+        let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        let busy_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(journal_mode, "delete");
+        assert_eq!(busy_timeout, 30_000);
     }
 
     #[tokio::test]
