@@ -308,7 +308,7 @@ test('@claim:mobile-demo-result shows the transformed envelope above the fold', 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/demo');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
-  for (const text of ['checkout-api', 'payment authorization timed out', '[REDACTED]']) {
+  for (const text of ['checkout-api', 'payment authorization timed out', '[REDACTED]', 'Envelope signed. Demo data was not stored.']) {
     const box = await page.getByText(text, { exact: text === 'checkout-api' || text === 'payment authorization timed out' }).first().boundingBox();
     expect(box?.y, text).toBeLessThan(844);
   }

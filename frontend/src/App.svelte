@@ -420,6 +420,7 @@
         {:else if previewState === 'error'}<div class="empty error-panel"><b>Preview stopped</b><p>{previewMessage}</p><button type="button" onclick={() => sample = sampleAlert}>Restore valid sample</button></div>
         {:else}
           <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
+          {#if path === '/demo'}<p class="demo-sealed">Envelope signed. Demo data was not stored.</p>{/if}
           <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
           <p class="redaction-result"><b>Sensitive fields</b> [REDACTED]</p>
           <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
@@ -427,7 +428,7 @@
           <details><summary>Inspect signed JSON</summary><!-- svelte-ignore a11y_no_noninteractive_tabindex (the bounded scroll region must accept keyboard focus) --><pre tabindex="0" aria-label="Signed evidence envelope JSON">{JSON.stringify(preview, null, 2)}</pre></details>
           <button class="copy" type="button" onclick={() => copy(JSON.stringify(preview, null, 2), 'Signed envelope copied')}>Copy envelope JSON</button>
         {/if}
-        <p class:bad={previewState === 'error'} class="bench-status" aria-live="polite">{previewMessage}</p>
+        {#if !(path === '/demo' && previewState === 'success')}<p class:bad={previewState === 'error'} class="bench-status" aria-live="polite">{previewMessage}</p>{/if}
       </div>
     </div>
   </section>

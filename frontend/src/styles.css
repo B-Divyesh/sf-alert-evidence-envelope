@@ -11,4 +11,5 @@
 .route-list{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0}.route-list button{min-height:44px;padding:8px 12px;border:1px solid var(--line);background:var(--raised);text-align:left;cursor:pointer}.route-list button.active{background:var(--deep);color:#fff;border-color:var(--deep)}.route-list small{display:block;font-size:10px;opacity:.75}.sr-status{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 html,body{overflow-x:hidden}
 .hero>*,.bench-grid>*,.form-grid>*,.field-kit>*,footer>*,.summary div{min-width:0}.envelope-output,.code-area,pre,code{max-width:100%;overflow-wrap:anywhere}
+.demo-sealed{margin:9px 0;color:var(--success);font-size:13px;font-weight:600}
 @media (max-width:600px){.test-bench .bench-grid{display:flex;flex-direction:column}.test-bench .envelope-output{order:-1}.test-bench .section-heading{margin-bottom:14px}.test-bench .envelope-output{padding:14px}.test-bench .summary{margin:10px 0}.test-bench .coordinates{margin:10px 0}.test-bench .fingerprint{margin:10px 0}.test-bench .bench-status{margin:8px 0 0}.test-bench .code-area{height:210px}}
