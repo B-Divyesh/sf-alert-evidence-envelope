@@ -1,36 +1,45 @@
-# Review 1 handoff — Alert Evidence Envelope
+# Polish 1 handoff — Alert Evidence Envelope
 
 Date: 2026-08-30
 
-Work order: `alert-evidence-envelope-review-1`
-
 ## Result
 
-**FAIL.** The complete adversarial report is in `.factory/review-1.md`. Product code was not modified.
+All `F-1-1` through `F-1-21` findings are closed. The detailed mapping is in `.factory/polish-1.md`.
 
-Blocking findings:
+Deployed commit: `c43bb3677e782fe5d080ad2a9c220e58a9b5aa79`  
+Live URL: `https://alert-evidence-envelope.sociobot.in`
 
-- The 390 × 844 demo's first viewport shows the sample input but not the transformed envelope result.
-- The privacy page says license tokens remain in the browser, while runtime code sends the token to Sociobot in a query URL.
+The deployed product reports that exact SHA from `/health`. Deployment verification passed with revision `sf-alert-evidence-envelope--0000021`, one active/running replica, the scoped `alert-evidence-envelope-data` Azure File mount at `/data`, and 20 fresh demo-session previews.
 
-The report also records unlisted public claims, route-focus/404 metadata gaps, plain-word copy issues, and the missing ability to create separate per-channel routes.
+## What changed
 
-## Verification performed
+- Made the 390px demo result-first, including service, error, redaction state, and signed status above the fold.
+- Removed license tokens from verification URLs; verification now uses an authorization header and records failed attempts before throttling them for 24 hours.
+- Added route list/create/update/delete support with independent route IDs, policies, destinations, and relay URLs.
+- Completed the claim inventory and observable tests; removed public assertions that could not be proved in the sandbox.
+- Reworked route titles/metadata, History API focus announcements, mobile header navigation, 404 metadata/chrome, legal wording, and plain-language copy.
 
-- Used fresh live Chromium contexts at 390 × 844 and 1440 × 900.
-- Exercised the live demo, Reset, Start for real, same-origin request logging, and offline reload.
-- Ran every exact `.factory/claims.json` command from clean clone `/tmp/aee-review-s2cEaR`; all listed claims passed.
-- Ran `npm test` in that clone; 18 Rust tests and 38/38 Playwright tests passed.
-- Ran the scoped live topology check only for `sf-alert-evidence-envelope`; it passed with one replica and `/data` storage.
-- Crawled internal, checkout, and source links; all intended links reached HTTP 200.
-- Ran Playwright axe on `/`, `/demo`, `/privacy`, `/terms`, and the designed 404 at mobile/desktop in light/dark; no serious or critical findings.
-- Ran `/opt/fleet/lib/verify-url.sh` against the live root; it passed with zero console errors.
+## Verification
 
-## Files changed
+- Clean dependency install: `npm ci` — PASS.
+- `npm test` — PASS: 22 Rust tests and 52 desktop/mobile Playwright tests.
+- `cargo fmt --check` — PASS.
+- `cargo clippy --all-targets --locked -- -D warnings` — PASS.
+- `npm run build` — PASS; initial JavaScript 26.00 KB gzip and CSS 5.18 KB gzip.
+- Live cold checks — PASS: `/health` SHA, root title/metadata, `/privacy` transport wording, designed 404 metadata/chrome, and 390×844 `/demo` result-first test with zero console errors.
+- Live accessibility — PASS: Playwright axe found zero serious/critical violations on `/`, `/demo`, `/privacy`, `/terms`, and the 404 at 390px.
+- `verify-url.sh` live root — PASS; its screenshots and report are in `/tmp/aee-live-evidence/` for this worker. The result-first mobile capture is `/tmp/aee-live-evidence/demo-390.png`.
 
-- Added `.factory/review-1.md`.
-- Replaced `.factory/handoff.md` with this review handoff.
+## Run and deploy
 
-## Next steps
+```sh
+npm ci
+npm test
+npm run build
+PORT=8080 cargo run
+npm run deploy
+```
 
-Resolve every `F-1-*` finding, add the missing claim entries/tests, deploy through the factory, and repeat the entire review from a fresh context. Do not treat the passing registered claim suite as sufficient while public claims remain unlisted.
+## Known gaps
+
+None. The optional standalone `@axe-core/cli` could not locate a Selenium Chrome binary in this worker; equivalent Playwright axe checks ran locally and against the live routes.
