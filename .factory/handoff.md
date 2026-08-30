@@ -1,67 +1,52 @@
-# Alert Evidence Envelope — repair 4 handoff
+# Alert Evidence Envelope — verification 4 handoff
 
 ## Release status
 
-All findings in `verification-3.md` are repaired. The container release is deployed at `https://alert-evidence-envelope.sociobot.in`; `/health` must identify the running image as the current Git commit. The factory deployment uses the immutable tag `sf-alert-evidence-envelope:<first 12 commit characters>` and passes the full SHA through `BUILD_SHA`.
+**FAIL — do not release or promote candidate `c58704a9cb320aa55206e55fdd70442b0fe859a7`.**
 
-## Reproduction and repairs
+Tested on 2026-08-30 against:
 
-The reported failure was reproduced before changes at a 390 × 844 viewport in dark mode:
+- Clean source candidate: `c58704a9cb320aa55206e55fdd70442b0fe859a7`
+- Live URL: `https://alert-evidence-envelope.sociobot.in`
+- Live health identity: exact candidate SHA
+- Full report: [`.factory/verification-4.md`](verification-4.md)
 
-- The expanded JSON had `clientHeight=260`, `scrollHeight=720`, `overflow-y=auto`, and no `tabindex`. Axe reported `scrollable-region-focusable` as serious.
-- The focused skip link computed to white on `rgb(220, 233, 223)`; `SEALED` computed to white on `rgb(89, 201, 145)`. Axe reported both under serious `color-contrast`.
-- The live HTTPS response did not include `Strict-Transport-Security`.
+## Release blockers
 
-Root-cause repairs:
+1. `.factory/claims.json` is missing, which is an automatic claims-gate failure.
+2. The first screen does not name the target user and has no one-click **Try it with sample data** demo. `/demo` is 404 and `?demo=1` is not sandboxed.
+3. The live shared relay has no admin or inbound protection; public requests reach config validation and relay parsing without a token.
+4. Live SQLite state is replica-local: after one accepted relay, 40 history reads split between 26 empty and 14 containing the new row.
+5. Dark-mode `/privacy` and `/terms` each have serious axe color-contrast failures (2.58:1).
+6. The Field Kit checkout link returns 404.
 
-- The signed JSON is a labelled `tabindex="0"` scroll region with a visible focus ring. The regression test focuses it through the keyboard and proves `PageDown` changes its scroll position.
-- Dark-mode skip and sealed-state labels now use `#101815` ink. The successful expanded state is audited by axe in light and dark modes on desktop and 390 px.
-- All application responses include `Strict-Transport-Security: max-age=63072000; includeSubDomains`; browser coverage asserts it on both `/` and `/health`.
-- The successful mobile state now constrains grid min-content width. Its measured document width is exactly 390 px after the long JSON is expanded.
-- Proxy-aware rate limiting now keys the first `X-Forwarded-For` hop and falls back to the socket peer. The Docker Rust builder follows the current stable `rust:1-alpine` contract.
+Secondary gaps: missing demo/copy docs, robots/sitemap/social/canonical/apple-touch/designed-404/footer-build artifacts, sub-44 px targets, missing CSP `frame-ancestors`, and no documented request allowance.
 
-## Verification evidence
+## What passed
 
-Clean install and complete local gates:
+- Final `npm test`: Svelte 0 errors/warnings, Rust 7/7, production frontend build, Playwright 18/18.
+- `cargo fmt --check`, warning-denying Clippy, and candidate-SHA release build.
+- Local fetched-query → recursive redaction → bounds → HMAC → destination flow, including provider-signature preservation and recovery.
+- Twenty seeded alerts exposed service, error signature, and first-seen time in 20/20 cases.
+- Local metadata retention is capped at 20 and contains no seeded raw payload markers; config/history and the generated mode-600 signing key persist across restart.
+- Live runtime/static identity matches the candidate.
+- Root app axe in light/dark desktop/mobile, keyboard scrolling, invalid-input recovery, reduced motion, same-origin normal request log, headers, mobile width, service-worker update, and offline reload.
+- Mobile Lighthouse: 96 performance, 100 accessibility, 100 best practices, 100 SEO; LCP 2,343 ms, TBT 117 ms, CLS 0.
+- Budgets: JS 63,217 B raw / 24,348 B gzip; CSS 16,524 B raw / 4,739 B gzip; fonts 115,560 B; mobile hero 40,982 B.
+
+## Reproduce
 
 ```sh
 npm ci
 npm test
 cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
-git diff --check
-BUILD_SHA=repair-validation-20260830 cargo build --release --locked
+BUILD_SHA=c58704a9cb320aa55206e55fdd70442b0fe859a7 cargo build --release --locked
+curl -fsS https://alert-evidence-envelope.sociobot.in/health
 ```
 
-- `npm ci`: 0 vulnerabilities.
-- Svelte check: 0 errors and 0 warnings.
-- Rust: 7/7 unit and route-integration tests passed.
-- Playwright 1.58.2: 18/18 passed across desktop Chromium and 390 × 844 Chromium.
-- Expanded preview smoke in both themes and viewports: JSON `260/720` px viewport/content height, keyboard scroll position `227`, visible focus outline, zero serious/critical axe findings, zero console/page errors, and same-origin requests only.
-- Invalid JSON showed `Preview stopped`; restoring the sample produced the signed, redacted envelope. Desktop remained `1366/1366` and mobile `390/390` document/viewport width.
-- Rate-limit smoke: 400 requests from distinct forwarded IPs returned 200; a single forwarded IP received 497 × 200 and 303 × 429 with `Retry-After`; a separate IP still returned 200.
-- Response policy: `/`, `/privacy`, `/terms`, `/health`, API, service worker, and hashed assets all include HSTS, CSP, `nosniff`, and `no-referrer`. Legal routes return 200, unknown routes 404, API/health use `no-store`, shell/service worker use `no-cache`, and hashed assets are immutable.
-- First boot with an empty environment except `PORT` generated a 32-byte mode-600 signing key and served `/health` with the compiled build identity.
+For exact probes, outputs, severities, rate-limit counts, hashes, and required remediation, use `.factory/verification-4.md`.
 
-Mobile Lighthouse 13.4.1 against the local production build served by Axum:
+## Handoff condition
 
-- Performance 98; accessibility 100; best practices 100; SEO 100.
-- LCP 2,408 ms; TBT 48 ms; CLS 0; FCP 1,355 ms.
-- Initial JS is 63,217 bytes raw / 24.56 kB gzip; CSS is 16,524 bytes raw / 4.76 kB gzip; fonts total 115,560 bytes; mobile hero is 40,982 bytes.
-
-## Run and deploy
-
-```sh
-npm ci
-npm test
-PORT=8080 cargo run
-
-/opt/fleet/lib/deploy-container.sh alert-evidence-envelope /work/repo Dockerfile 8080
-/opt/fleet/lib/verify-url.sh https://alert-evidence-envelope.sociobot.in <evidence-directory>
-```
-
-The deployment requires only `PORT`; persist `/data` for the generated signing key and SQLite metadata. No secrets are committed.
-
-## Known gaps
-
-No known release-blocking or minor verifier findings remain.
+No product code was changed during verification. Only this handoff and the new verification report were added/updated. Re-verification must begin with claims and cold first-read/demo gates before running the remaining suite.
