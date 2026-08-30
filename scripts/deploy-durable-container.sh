@@ -51,7 +51,7 @@ fi
 app=$(az containerapp show --resource-group "$resource_group" --name "$app_name" --output json)
 template=$(jq --arg storage "$storage_name" --arg image "$image" '
   .properties.template
-  | del(.revisionSuffix)
+  | .revisionSuffix = null
   | .scale = {minReplicas: 1, maxReplicas: 1}
   | .volumes = [{name: "envelope-data", storageType: "AzureFile", storageName: $storage}]
   | .containers |= map(if .name == "app" then .image = $image | .volumeMounts = [{volumeName: "envelope-data", mountPath: "/data"}] else . end)

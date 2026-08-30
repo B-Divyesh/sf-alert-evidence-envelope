@@ -28,6 +28,7 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tower_http::{
     compression::CompressionLayer, limit::RequestBodyLimitLayer,
     set_header::SetResponseHeaderLayer, trace::TraceLayer,
@@ -409,15 +410,18 @@ async fn restore_database_snapshot(paths: &SnapshotPaths) -> anyhow::Result<()> 
         let stale = PathBuf::from(format!("{}{}", paths.database.display(), suffix));
         let _ = tokio::fs::remove_file(stale).await;
     }
-    tokio::fs::copy(&paths.durable, &paths.database)
+    let contents = tokio::fs::read(&paths.durable)
         .await
-        .with_context(|| {
-            format!(
-                "restore SQLite snapshot {} to {}",
-                paths.durable.display(),
-                paths.database.display()
-            )
-        })?;
+        .with_context(|| format!("read SQLite snapshot {}", paths.durable.display()))?;
+    let mut database = tokio::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&paths.database)
+        .await
+        .with_context(|| format!("open restored database {}", paths.database.display()))?;
+    database.write_all(&contents).await?;
+    database.sync_all().await?;
     Ok(())
 }
 
@@ -431,20 +435,19 @@ async fn persist_database_snapshot(state: &AppState) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("snapshot path must have a parent directory"))?;
     tokio::fs::create_dir_all(parent).await?;
     let temporary = paths.durable.with_extension("db.next");
-    tokio::fs::copy(&paths.database, &temporary)
+    let contents = tokio::fs::read(&paths.database)
         .await
-        .with_context(|| {
-            format!(
-                "copy SQLite database {} to durable snapshot {}",
-                paths.database.display(),
-                temporary.display()
-            )
-        })?;
-    let temporary_file = tokio::fs::OpenOptions::new()
-        .read(true)
+        .with_context(|| format!("read SQLite database {}", paths.database.display()))?;
+    let mut temporary_file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
         .open(&temporary)
-        .await?;
+        .await
+        .with_context(|| format!("open durable snapshot {}", temporary.display()))?;
+    temporary_file.write_all(&contents).await?;
     temporary_file.sync_all().await?;
+    drop(temporary_file);
     tokio::fs::rename(&temporary, &paths.durable)
         .await
         .with_context(|| format!("publish durable snapshot {}", paths.durable.display()))?;
@@ -1113,6 +1116,10 @@ async fn record_delivery(
         .bind(&envelope.query_fingerprint).bind(&envelope.created_at)
         .bind(envelope.evidence_items as i64).bind(envelope.evidence_bytes as i64)
         .execute(&state.db).await.map_err(|e| ApiError::Internal(e.into()))?;
+    sqlx::query("DELETE FROM deliveries WHERE id NOT IN (SELECT id FROM deliveries ORDER BY created_at DESC LIMIT 20)")
+        .execute(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.into()))?;
     persist_database_snapshot(state)
         .await
         .map_err(ApiError::Internal)?;
@@ -1416,7 +1423,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let app = api_router(state);
+        let app = api_router(state.clone());
 
         for (method, uri) in [
             ("GET", "/api/v1/config"),
@@ -1682,7 +1689,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let app = api_router(state);
+        let app = api_router(state.clone());
         for index in 0..25 {
             let body = json!({
                 "service": format!("service-{index}"),
@@ -1724,5 +1731,10 @@ mod tests {
         let bytes = to_bytes(response.into_body(), 100_000).await.unwrap();
         let history: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(history.as_array().unwrap().len(), 20);
+        let retained: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM deliveries")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(retained, 20);
     }
 }
