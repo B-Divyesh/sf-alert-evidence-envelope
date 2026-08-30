@@ -4,7 +4,7 @@ Alert Evidence Envelope treats an incident as terrain that must be surveyed befo
 
 ## Palette
 
-The light treatment is the primary one, chosen for long on-call reading sessions: `paper #F3F0E5`, `paper-raised #FCFAF2`, `ink #17241F`, `muted #526158`, `pine #194D3A`, `pine-deep #0D3529`, `amber #C76820`, `amber-dark #92420D`, `line #C8C8B8`, `danger #A1352C`, and `success #176A49`. All body copy and interactive states meet 4.5:1. The explicit dark treatment uses `night #101815`, `night-raised #18231F`, `chalk #F0EFE4`, `muted #AAB6AE`, `amber #F0A45B`, and `line #3F5149`. It is activated by the user’s OS preference. Color is always accompanied by text or a symbol.
+The light treatment is the primary one, chosen for long on-call reading sessions: `paper #F3F0E5`, `paper-raised #FCFAF2`, `ink #17241F`, `muted #526158`, `pine #194D3A`, `pine-deep #0D3529`, `amber #C76820`, `amber-dark #92420D`, `line #C8C8B8`, `danger #A1352C`, and `success #176A49`. All body copy and interactive states meet 4.5:1. The explicit dark treatment uses `night #101815`, `night-raised #18231F`, `chalk #F0EFE4`, `muted #AAB6AE`, `amber #F0A45B`, and `line #3F5149`. Dark-mode labels on the light `pine-deep` and `success #59C991` states use `night #101815` ink, giving 4.5:1 or better. It is activated by the user’s OS preference. Color is always accompanied by text or a symbol.
 
 ## Type and spacing
 
@@ -29,4 +29,4 @@ One original raster hero depicts an abstract nocturnal topographic incident map 
 
 **Prompt sheet:** “Editorial topographic cartography of a software incident: layered cream survey paper floating over deep pine terrain, precise contour lines and coordinate ticks, one burnt-amber alert route entering from the left, passing through a small redaction checkpoint, resolving into a compact sealed dark-green evidence envelope on the right, subtle ink texture, raking field-station light, oblique 35mm lens, restrained cream/pine/amber palette, sophisticated technical publication, abundant negative space, no humans, no screens, no dashboards, no text, no letters, no numbers, no logos, no watermark, no neon gradient, no glossy 3D, no corporate stock art.”
 
-The image is generated specifically for this product with the factory Azure image deployment (`factory-image`) on 2026-08-27. Generated imagery is original and disclosed in the footer. Prompt metadata is retained beside source assets.
+The image is generated specifically for this product with the factory Azure image deployment (`factory-image`) on 2026-08-27. Generated imagery is original and disclosed in the footer. Prompt metadata is retained beside source assets. The mobile WebP is a reviewed 720 × 480 derivative of that source (40,982 bytes); the desktop WebP remains 1536 × 1024.

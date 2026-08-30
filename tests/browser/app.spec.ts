@@ -16,12 +16,43 @@ test('builds a bounded, redacted evidence preview', async ({ page }) => {
   expect(consoleErrors).toEqual([]);
 });
 
-test('has no serious accessibility violations', async ({ page }) => {
-  await page.goto('/');
+test('keeps the expanded signed JSON keyboard-scrollable and free of serious accessibility violations', async ({ page }) => {
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Build safe preview' }).click();
+    await expect(page.getByText('Envelope signed. No sample data was stored.')).toBeVisible();
+    await page.getByText('Inspect signed JSON').click();
+
+    const signedJson = page.getByLabel('Signed evidence envelope JSON');
+    await expect(signedJson).toHaveAttribute('tabindex', '0');
+    const scrollBox = await signedJson.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(scrollBox.scrollHeight).toBeGreaterThan(scrollBox.clientHeight);
+    const pageWidth = await page.evaluate(() => ({
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }));
+    expect(pageWidth.document).toBeLessThanOrEqual(pageWidth.viewport);
+    await page.getByText('Inspect signed JSON').focus();
+    await page.keyboard.press('Tab');
+    await expect(signedJson).toBeFocused();
+    await expect(signedJson).toHaveCSS('outline-style', 'solid');
+    await page.keyboard.press('PageDown');
+    await expect.poll(() => signedJson.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    await page.getByRole('link', { name: 'Skip to main content' }).focus();
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
     expect(results.violations.filter((v) => ['serious', 'critical'].includes(v.impact || '')), colorScheme).toEqual([]);
+  }
+});
+
+test('sends the transport-security policy on pages and APIs', async ({ request }) => {
+  for (const path of ['/', '/health']) {
+    const response = await request.get(path);
+    expect(response.headers()['strict-transport-security'], path).toBe('max-age=63072000; includeSubDomains');
   }
 });
 

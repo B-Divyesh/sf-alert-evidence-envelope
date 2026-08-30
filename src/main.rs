@@ -10,7 +10,9 @@ use axum::{
 };
 use std::{env, net::SocketAddr};
 use tokio::signal;
-use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
+use tower_governor::{
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+};
 use tower_http::{
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
@@ -50,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     let governor = GovernorConfigBuilder::default()
         .per_millisecond(5)
         .burst_size(300)
+        .key_extractor(SmartIpKeyExtractor)
         .finish()
         .expect("valid rate limit configuration");
     let app = Router::new()
@@ -69,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(middleware::from_fn(cache_policy))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("referrer-policy"), HeaderValue::from_static("no-referrer")))
+        .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("strict-transport-security"), HeaderValue::from_static("max-age=63072000; includeSubDomains")))
         .layer(SetResponseHeaderLayer::if_not_present(HeaderName::from_static("content-security-policy"), HeaderValue::from_static("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https://api.sociobot.in")));
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "8080".into())

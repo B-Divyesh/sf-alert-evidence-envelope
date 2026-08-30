@@ -272,7 +272,7 @@
           <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
           <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
           <p class="fingerprint"><span>Query fingerprint</span><code>{preview.query_fingerprint}</code></p>
-          <details><summary>Inspect signed JSON</summary><pre>{JSON.stringify(preview, null, 2)}</pre></details>
+          <details><summary>Inspect signed JSON</summary><!-- svelte-ignore a11y_no_noninteractive_tabindex (the bounded scroll region must accept keyboard focus) --><pre tabindex="0" aria-label="Signed evidence envelope JSON">{JSON.stringify(preview, null, 2)}</pre></details>
           <button class="copy" type="button" onclick={() => copy(JSON.stringify(preview, null, 2), 'Signed envelope copied')}>Copy envelope JSON</button>
         {/if}
         <p class:bad={previewState === 'error'} class="bench-status" aria-live="polite">{previewMessage}</p>

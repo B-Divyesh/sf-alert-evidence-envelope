@@ -11,4 +11,25 @@
 
 @media (max-width: 900px) {
   .field-kit { grid-template-columns: minmax(0, 1fr); }
+  .bench-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.bench-grid > *,
+.envelope-output,
+.envelope-output details {
+  min-width: 0;
+}
+
+/* Signed evidence can exceed its bounded viewport, so its focus treatment is
+   part of the inspection control rather than a decorative code style. */
+pre:focus-visible {
+  outline: 3px solid #dc7c31;
+  outline-offset: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .skip-link,
+  .envelope-head span {
+    color: #101815;
+  }
 }

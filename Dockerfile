@@ -5,7 +5,7 @@ RUN npm ci
 COPY frontend ./frontend
 RUN npm run build
 
-FROM rust:1.98-alpine AS backend
+FROM rust:1-alpine AS backend
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 ARG BUILD_SHA=development
