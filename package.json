@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite --config frontend/vite.config.ts",
     "build": "vite build --config frontend/vite.config.ts",
-    "test": "npm run check && cargo test --locked && npm run test:deployment-policy && npm run build && playwright test",
-    "test:claims": "npm run build && playwright test",
+    "test": "npm run check && cargo test --locked && npm run test:deployment-policy && npm run test:claims-manifest && npm run test:browser:prepare && playwright test",
+    "test:claims": "npm run test:browser:prepare && playwright test",
+    "test:browser:prepare": "VITE_BUILD_SHA=test-build-identity npm run build && BUILD_SHA=test-build-identity cargo build --locked",
     "test:deployment-policy": "node scripts/test-deployment-policy.mjs",
+    "test:claims-manifest": "node scripts/test-claims-manifest.mjs",
     "verify:live-topology": "bash scripts/verify-live-topology.sh",
     "deploy": "bash scripts/deploy-durable-container.sh",
     "test:e2e": "playwright test",

@@ -15,7 +15,7 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['iPhone 13'], browserName: 'chromium', viewport: { width: 390, height: 844 } } },
   ],
   webServer: {
-    command: `PORT=4178 DATABASE_URL=sqlite:data/playwright.db?mode=rwc STATIC_DIR=dist ENVELOPE_SIGNING_KEY=playwright-signing-key-at-least-32-bytes ADMIN_TOKEN=test-admin-token-with-at-least-32-characters INBOUND_TOKEN=test-inbound-token-with-at-least-32-characters BUILD_SHA=${testBuildSha} cargo run --quiet`,
+    command: `PORT=4178 DATABASE_URL=sqlite:data/playwright.db?mode=rwc STATIC_DIR=dist ENVELOPE_SIGNING_KEY=playwright-signing-key-at-least-32-bytes ADMIN_TOKEN=test-admin-token-with-at-least-32-characters INBOUND_TOKEN=test-inbound-token-with-at-least-32-characters BUILD_SHA=${testBuildSha} ./target/debug/alert-evidence-envelope`,
     url: 'http://127.0.0.1:4178/health',
     reuseExistingServer: true,
     timeout: 120_000,

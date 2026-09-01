@@ -57,8 +57,9 @@
   let routeAnnouncement = '';
 
   onMount(() => {
+    online = navigator.onLine;
     updateMetadata();
-    void loadBuildIdentity();
+    if (online) void loadBuildIdentity();
     window.addEventListener('popstate', () => void setRoute(location.pathname, false));
     if (path === '/demo') {
       const cached = localStorage.getItem(demoPreviewKey);
@@ -90,7 +91,14 @@
     };
   });
 
-  function updateOnline() { online = navigator.onLine; }
+  function updateOnline() {
+    online = navigator.onLine;
+    if (path === '/demo' && previewState === 'success') {
+      previewMessage = online
+        ? 'Envelope signed. Demo data was not stored.'
+        : 'Offline sample ready. Demo data was not stored.';
+    }
+  }
 
   function updateMetadata() {
     const canonical = `https://alert-evidence-envelope.sociobot.in${path === '/demo' ? '/demo' : '/'}`;
@@ -121,6 +129,7 @@
   }
 
   async function loadBuildIdentity() {
+    if (!navigator.onLine) return;
     try {
       const response = await fetch('/health');
       if (response.ok) buildId = (await response.json()).build || buildId;
@@ -204,6 +213,17 @@
   }
 
   async function runPreview() {
+    if (!navigator.onLine) {
+      online = false;
+      if (path === '/demo' && preview) {
+        previewState = 'success';
+        previewMessage = 'Offline sample ready. Demo data was not stored.';
+      } else {
+        previewState = 'error';
+        previewMessage = 'The relay is offline. Reconnect before building a preview.';
+      }
+      return;
+    }
     previewState = 'loading'; previewMessage = 'Bounding and redacting evidence…'; preview = null;
     try {
       const alert = JSON.parse(sample);
@@ -229,7 +249,8 @@
   }
 
   async function startDemo(reset: boolean) {
-    if (!online) {
+    if (!navigator.onLine) {
+      online = false;
       if (!preview) {
         previewState = 'error';
         previewMessage = 'The sample is not cached yet. Reconnect once to start the demo.';
@@ -420,7 +441,7 @@
         {:else if previewState === 'error'}<div class="empty error-panel"><b>Preview stopped</b><p>{previewMessage}</p><button type="button" onclick={() => sample = sampleAlert}>Restore valid sample</button></div>
         {:else}
           <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
-          {#if path === '/demo'}<p class="demo-sealed">Envelope signed. Demo data was not stored.</p>{/if}
+          {#if path === '/demo'}<p class="demo-sealed" aria-live="polite">{previewMessage}</p>{/if}
           <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
           <p class="redaction-result"><b>Sensitive fields</b> [REDACTED]</p>
           <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>

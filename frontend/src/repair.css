@@ -43,6 +43,19 @@ pre:focus-visible {
   align-items: center;
 }
 
+.site-header nav a,
+.footer-links a {
+  min-width: 44px;
+  justify-content: center;
+}
+
+.toggle input {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+}
+
 .action-note {
   margin: 12px 0 0;
   color: var(--muted);

@@ -198,18 +198,31 @@ async fn not_found() -> impl IntoResponse {
 async fn cache_policy(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_owned();
     let mut response = next.run(request).await;
-    let value =
-        if path.starts_with("/assets/") || path.starts_with("/fonts/") || path == "/favicon.svg" {
-            "public, max-age=31536000, immutable"
-        } else if path.starts_with("/api/") || path == "/health" {
-            "no-store"
-        } else {
-            "no-cache"
-        };
+    let value = if is_versioned_vite_asset(&path) {
+        "public, max-age=31536000, immutable"
+    } else if path.starts_with("/api/") || path == "/health" {
+        "no-store"
+    } else {
+        "no-cache"
+    };
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static(value));
     response
+}
+
+fn is_versioned_vite_asset(path: &str) -> bool {
+    let Some(file) = path.strip_prefix("/assets/index-") else {
+        return false;
+    };
+    let Some((hash, extension)) = file.rsplit_once('.') else {
+        return false;
+    };
+    !hash.is_empty()
+        && hash.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        })
+        && matches!(extension, "js" | "css")
 }
 
 async fn shutdown() {

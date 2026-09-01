@@ -88,6 +88,17 @@ test('sends security and cache policy headers', async ({ request }) => {
     expect(headers['cache-control'], path.startsWith('/api/') || path === '/health' ? path : undefined)
       .toBe(path.startsWith('/api/') || path === '/health' ? 'no-store' : 'no-cache');
   }
+  for (const path of ['/fonts/inter-latin.woff2', '/assets/evidence-terrain-960.webp', '/assets/social-card.jpg', '/favicon.svg']) {
+    expect((await request.get(path)).headers()['cache-control'], path).toBe('no-cache');
+  }
+  const html = await (await request.get('/')).text();
+  const versionedAssets = [...html.matchAll(/(?:src|href)="(\/assets\/index-[^"]+\.(?:js|css))"/g)]
+    .map((match) => match[1]);
+  expect(versionedAssets).toHaveLength(2);
+  for (const path of versionedAssets) {
+    expect((await request.get(path)).headers()['cache-control'], path)
+      .toBe('public, max-age=31536000, immutable');
+  }
 });
 
 test('exposes the skip link as the first keyboard target', async ({ page }) => {
@@ -149,11 +160,21 @@ test('@claim:offline-demo reloads the sample offline after the first visit', asy
   await page.goto(`${baseURL}/demo`);
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
   await page.evaluate(() => navigator.serviceWorker.ready);
+  const offlineRequests: string[] = [];
+  const failedRequests: string[] = [];
+  let offline = false;
+  page.on('request', (request) => { if (offline) offlineRequests.push(request.url()); });
+  page.on('requestfailed', (request) => {
+    if (offline) failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`);
+  });
   await context.setOffline(true);
+  offline = true;
   await page.reload();
   await expect(page.getByText('Demo — sample data, nothing is saved')).toBeVisible();
   await expect(page.getByText('Offline sample ready. Demo data was not stored.')).toBeVisible();
   await expect(page.getByText('checkout-api', { exact: true })).toBeVisible();
+  expect(offlineRequests.filter((url) => /\/(?:health|api\/)/.test(new URL(url).pathname))).toEqual([]);
+  expect(failedRequests).toEqual([]);
   await context.setOffline(false);
   await context.close();
 });
@@ -163,7 +184,7 @@ test('keeps an updateable offline shell', async ({ page }) => {
   const shell = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
     await registration.update();
-    return (await caches.keys()).includes('envelope-shell-v4');
+    return (await caches.keys()).includes('envelope-shell-v5');
   });
   expect(shell).toBe(true);
 });
@@ -233,15 +254,25 @@ test('moves focus and announces the new route after in-app navigation', async ({
   await expect(page.locator('h1')).toBeFocused();
 });
 
-test('keeps navigation touch targets at least 44px high', async ({ page }) => {
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-    await page.setViewportSize(viewport);
-    await page.goto('/');
-    const heights = await page.locator('.brand, .site-header nav a, .footer-links a').evaluateAll((elements) =>
-      elements.map((element) => ({ text: element.textContent?.trim(), height: element.getBoundingClientRect().height }))
-        .filter((element) => element.height > 0),
+test('keeps every 390px interactive target at least 44 by 44px', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const path of ['/', '/demo', '/privacy', '/terms']) {
+    await page.goto(path);
+    if (path === '/demo') await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
+    const targets = await page.locator('a[href], button, input:not([type="hidden"]), select, textarea, summary').evaluateAll((elements) =>
+      elements.map((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          name: element.getAttribute('aria-label') || element.textContent?.trim() || element.getAttribute('name') || element.tagName,
+          width: box.width,
+          height: box.height,
+        };
+      }).filter((element) => element.width > 0 && element.height > 0),
     );
-    for (const target of heights) expect(target.height, `${viewport.width}px ${target.text}`).toBeGreaterThanOrEqual(44);
+    for (const target of targets) {
+      expect(target.width, `${path} ${target.name} width`).toBeGreaterThanOrEqual(44);
+      expect(target.height, `${path} ${target.name} height`).toBeGreaterThanOrEqual(44);
+    }
   }
 });
 
