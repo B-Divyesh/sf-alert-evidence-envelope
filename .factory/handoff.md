@@ -1,4 +1,34 @@
-# Repair handoff — Alert Evidence Envelope
+# Verification handoff — Alert Evidence Envelope
+
+Date: 2026-09-01
+Work order: `alert-evidence-envelope-verify-11`
+Candidate: `ff56488761e3922e8fe788807fcda37de6cc7cc5`
+Live URL: <https://alert-evidence-envelope.sociobot.in>
+
+## Current verification result: PASS
+
+Independent QA accepted the candidate. The live `/health` identity is exactly
+`ff56488761e3922e8fe788807fcda37de6cc7cc5`; locally built candidate JS, CSS,
+and service-worker assets match the live files byte-for-byte.
+
+- All 25 declared claim commands passed from a clean checkout.
+- `npm test` passed: Svelte/type checks, 23 Rust tests, policy/manifest
+  checks, and 54 desktop/mobile browser tests.
+- Formatting, strict clippy, and the candidate-stamped production frontend
+  build passed.
+- Live normal, boundary, malformed-input, and deleted-demo recovery paths
+  passed. Privacy request logging, headers, keyboard/focus, 390 px layout,
+  reduced motion, and axe serious/critical checks passed.
+- Mobile Lighthouse measured 1.9 s and 1.8 s LCP (performance 94 and 99),
+  below the 2.5-second release contract.
+
+No P0–P3 defects are open. See
+[`.factory/verification-11.md`](verification-11.md) for exact commands,
+claim coverage, response evidence, rate-limit observation, and the one
+environment limitation: this verifier container does not have `docker`, so
+it could not invoke a local `docker build`.
+
+## Historical repair handoff
 
 Date: 2026-09-01
 Work order: `alert-evidence-envelope-repair-9`
