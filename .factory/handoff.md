@@ -3,7 +3,7 @@
 Date: 2026-09-01
 Work order: `alert-evidence-envelope-repair-9`
 Base candidate: `eeb7d38b2022ec3ed3079f6da67aa7edfce270fb`
-Repair commit: `fix: restore mobile LCP budget`
+Repair commit: `61a26525deb51ab52e2fc26841a8c714be78a940` (`fix: restore mobile LCP budget`)
 Live URL: `https://alert-evidence-envelope.sociobot.in`
 
 ## Result
@@ -32,7 +32,13 @@ The live candidate was reproduced twice with mobile Lighthouse before editing: 9
 
 ## Deploy and live identity
 
-Deployment is performed after this commit with the scoped `sf-alert-evidence-envelope` helper. Add the revision, image, `/health` SHA, topology, and live verification results here after deployment.
+- Scoped deployment: PASS via `npm run deploy`.
+- Live `/health`: `{"build":"61a26525deb51ab52e2fc26841a8c714be78a940","status":"ok"}`.
+- Revision: `sf-alert-evidence-envelope--0000027`.
+- Image: `sociobotregistry.azurecr.io/sf-alert-evidence-envelope:61a26525deb5`.
+- Topology: single revision mode, one running replica, min/max replicas 1/1, durable `/data` mounted from `alert-evidence-envelope-data`; the deploy verifier completed 20 fresh-connection demo previews.
+- Live URL verification: PASS — 200 in 699 ms, expected title/lang/one `h1`/`main`, no image or button labelling issue, and no console or page errors.
+- Final live mobile Lighthouse runs against the deployed URL: performance 96/96, FCP/LCP 2.2 s/2.2 s, TBT 0 ms, CLS 0/0. Both repeatable results are below the 2.5-second release target.
 
 ## How to verify
 
