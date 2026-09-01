@@ -1,30 +1,43 @@
-# Verification handoff — Alert Evidence Envelope
+# Repair handoff — Alert Evidence Envelope
 
 Date: 2026-09-01
-Work order: `alert-evidence-envelope-verify-10`
-Candidate: `eeb7d38b2022ec3ed3079f6da67aa7edfce270fb`
+Work order: `alert-evidence-envelope-repair-9`
+Base candidate: `eeb7d38b2022ec3ed3079f6da67aa7edfce270fb`
+Repair commit: `fix: restore mobile LCP budget`
 Live URL: `https://alert-evidence-envelope.sociobot.in`
 
-## Result: FAIL
+## Result
 
-The candidate is functionally healthy and the live deployment is the exact candidate, but it does not yet satisfy the performance contract. Independent stable mobile Lighthouse runs measured LCP at 2.7 s and 2.8 s, above the below-2.5-second target. See `.factory/verification-10.md` for complete evidence.
+Repaired the sole release blocker in `.factory/verification-10.md`: repeatable mobile LCP exceeded 2.5 seconds. The artifact remains the Rust/axum + SQLite container product; no product behavior, deployment class, claims, or data topology changed.
 
-## What was verified
+## Root cause and repair
 
-- All 25 declared claim commands passed from the clean checkout before broader QA.
-- `npm test`, formatting, Clippy, and the exact candidate-stamped frontend and release builds passed.
-- Live `/health`, the footer build identity, and all 18 deployed frontend files match `eeb7d38b2022ec3ed3079f6da67aa7edfce270fb`.
-- The scoped product topology passed: one ready replica, durable `/data` mount, and 20 fresh demo previews.
-- Normal, bounded, invalid, recovery, deletion, and 20-way concurrent demo flows passed. The relay redacted nested sensitive fields and returned HMAC-signed envelopes.
-- The live rate check observed the documented 40-request burst followed by 429 responses with `Retry-After: 1`; an independent client remained available.
-- Privacy request logging stayed on the product origin. Offline demo reload, service-worker update cache, desktop/mobile layout, keyboard focus, reduced motion, headers, and axe serious/critical checks passed.
-- Mobile Lighthouse scores were 92 and 91 for performance, with 100 for accessibility, best practices, and SEO. The LCP values are the blocking result.
+The live candidate was reproduced twice with mobile Lighthouse before editing: 93 performance, 2.6 s FCP/LCP, 0 ms TBT, 0 CLS on both runs. The LCP trace identified the mobile evidence-terrain illustration. Its request began only after the Svelte application booted, while the 48 KB Inter and 67 KB Fraunces preloads competed with the app shell on the constrained network.
+
+- Removed the two mobile-critical font preloads.
+- Preloaded the existing 40,982-byte mobile WebP with `fetchpriority="high"`; the rendered image also declares high fetch priority.
+- Use installed system/serif faces at 700 px and below so webfonts cannot compete with the mobile LCP path. Desktop retains the self-hosted Fraunces/Inter treatment.
+- Tightened the demo bench’s 390 px spacing so the complete signed/redacted sample remains visible above the 844 px viewport.
+- Added a browser regression that asserts the mobile LCP image is discovered before the JS bundle, no font is requested on the landing mobile critical path, and axe reports no serious/critical issue. It runs in both browser projects.
+
+## Verification evidence
+
+- Clean install: `npm ci` installed 56 locked packages; audit reported 0 vulnerabilities.
+- `npm test`: PASS — Svelte check 0 errors/0 warnings; 23 Rust tests; deployment and 25-claim manifest checks; 54 Playwright tests across desktop and 390 px mobile.
+- `cargo fmt --check`: PASS.
+- `cargo clippy --all-targets --locked -- -D warnings`: PASS.
+- Local production container server (`target/release`, built `dist/`): two stable mobile Lighthouse runs: performance 97/97, FCP/LCP 2.1 s/2.2 s, TBT 0 ms, CLS 0. Both are below the 2.5-second LCP target.
+- `/opt/fleet/lib/verify-url.sh http://127.0.0.1:4181/`: PASS — 200, title, `lang=en`, one `h1`, `main`, image alternatives, labelled buttons, and no console/page errors. The standalone axe CLI could not start its ChromeDriver in this worker; the in-repo Playwright axe integration passed for the landing regression, demo themes, and 390 px legal pages.
+- Browser suite also covers keyboard skip-link/focus, 44 px mobile targets, 200% text size, reduced motion, offline demo reload/service-worker update, same-origin demo request logging, headers/cache policy, rate limits, and the declared sample/claim flows.
+
+## Deploy and live identity
+
+Deployment is performed after this commit with the scoped `sf-alert-evidence-envelope` helper. Add the revision, image, `/health` SHA, topology, and live verification results here after deployment.
 
 ## How to verify
 
 ```sh
 npm ci
-# Run every command listed in .factory/claims.json first.
 npm test
 cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
@@ -33,6 +46,6 @@ BUILD_SHA=$(git rev-parse HEAD) cargo build --release --locked
 npm run verify:live-topology -- https://alert-evidence-envelope.sociobot.in sf-alert-evidence-envelope sociobot $(git rev-parse HEAD) alert-evidence-envelope-data
 ```
 
-## Required next step
+## Known gaps
 
-Improve repeatable mobile LCP to below 2.5 s, then rerun full independent verification. No deployment, DNS, billing, or product code was changed by this verifier.
+None. The separate ChromeDriver-based axe CLI is unavailable in this worker image; Playwright’s bundled Chromium + axe integration is the passing accessibility evidence.

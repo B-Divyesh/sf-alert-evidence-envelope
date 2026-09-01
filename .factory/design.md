@@ -8,7 +8,7 @@ The light treatment is the primary one, chosen for long on-call reading sessions
 
 ## Type and spacing
 
-Headings use self-hosted **Fraunces**, whose slightly irregular serif forms evoke engraved map labels. Interface copy and numbers use self-hosted **Inter**, with tabular numerals for payload sizes, times, and fingerprints. The type scale is 14 / 16 / 20 / 28 / 44 / 64 px. The reading measure is 68 characters. Spacing follows a 4 px base with 8, 12, 16, 24, 32, 48, 64, and 96 px stops. Controls are at least 44 px high.
+Headings use self-hosted **Fraunces**, whose slightly irregular serif forms evoke engraved map labels. Interface copy and numbers use self-hosted **Inter**, with tabular numerals for payload sizes, times, and fingerprints. At 700 px and below, the landing shell deliberately uses the installed system sans and Georgia-style serif instead: the 48 KB/67 KB webfont pair would otherwise compete with the mobile evidence-terrain LCP image. The palette, contour geometry, scale, and hierarchy preserve the field-instrument identity on phones while keeping repeatable mobile LCP under the product budget. The type scale is 14 / 16 / 20 / 28 / 44 / 64 px. The reading measure is 68 characters. Spacing follows a 4 px base with 8, 12, 16, 24, 32, 48, 64, and 96 px stops. Controls are at least 44 px high.
 
 ## Components and interaction grammar
 

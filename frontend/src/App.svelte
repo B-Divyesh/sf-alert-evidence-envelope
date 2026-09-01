@@ -391,7 +391,7 @@
       <ul class="trust-list" aria-label="Product facts"><li>Demo data is never added to route history</li><li>No analytics or third-party scripts</li><li>Self-hosted core is free; Field Kit costs $39 once</li></ul>
     </div>
     <figure class="terrain">
-      <picture><source media="(max-width: 700px)" srcset="/assets/evidence-terrain-960.webp" /><img src="/assets/evidence-terrain-1536.webp" width="1536" height="1024" decoding="async" alt="An amber alert path crosses a topographic incident map, passes a redaction mark, and arrives at a sealed green envelope." /></picture>
+      <picture><source media="(max-width: 700px)" srcset="/assets/evidence-terrain-960.webp" /><img src="/assets/evidence-terrain-1536.webp" width="1536" height="1024" decoding="async" fetchpriority="high" alt="An amber alert path crosses a topographic incident map, passes a redaction mark, and arrives at a sealed green envelope." /></picture>
       <figcaption><span>BOUNDARY 32 KB</span><span>ROUTE VERIFIED</span></figcaption>
     </figure>
   </section>

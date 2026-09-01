@@ -128,4 +128,47 @@ pre:focus-visible {
     justify-content: center;
     text-align: center;
   }
+
+  /* Keep the completed sample envelope inside the 390 × 844 demo viewport. */
+  .test-bench .bench-grid {
+    margin-top: 32px;
+  }
+}
+
+/*
+ * The mobile first screen includes the evidence-terrain LCP image. The full
+ * self-hosted type pair used to compete with that image and the shell under
+ * Lighthouse's constrained connection. Keep the engraved display treatment
+ * on larger screens, while using installed serif and sans-serif faces on
+ * phones. That means neither 48 KB/67 KB webfont belongs on the mobile LCP
+ * path.
+ */
+@media (max-width: 700px) {
+  :root,
+  button,
+  input,
+  textarea,
+  select {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  legend b {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .brand em,
+  .hero h1,
+  .legal h1,
+  .section-heading h1,
+  .section-heading h2,
+  .workspace h2,
+  .field-kit h2,
+  .route-stages h3,
+  legend,
+  .empty h3,
+  .error-panel b,
+  .ledger-empty > span,
+  .ledger-empty h3 {
+    font-family: Georgia, "Times New Roman", serif;
+  }
 }

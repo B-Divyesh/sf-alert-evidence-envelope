@@ -154,6 +154,24 @@ test('never widens the 390px mobile viewport', async ({ page }) => {
   }
 });
 
+test('discovers the mobile LCP image before app boot without loading webfonts', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const fontRequests: string[] = [];
+  const requestOrder: string[] = [];
+  page.on('request', (request) => {
+    requestOrder.push(new URL(request.url()).pathname);
+    if (request.resourceType() === 'font') fontRequests.push(new URL(request.url()).pathname);
+  });
+  await page.goto('/');
+  await expect(page.locator('h1')).toHaveText('Send safe evidence with every alert');
+  await expect(page.getByRole('link', { name: 'Try it with sample data' })).toBeVisible();
+  expect(fontRequests).toEqual([]);
+  expect(requestOrder.indexOf('/assets/evidence-terrain-960.webp')).toBeGreaterThanOrEqual(0);
+  expect(requestOrder.indexOf('/assets/evidence-terrain-960.webp'))
+    .toBeLessThan(requestOrder.findIndex((path) => path.startsWith('/assets/index-') && path.endsWith('.js')));
+  expect(await seriousAxe(page)).toEqual([]);
+});
+
 test('@claim:offline-demo reloads the sample offline after the first visit', async ({ browser, baseURL }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
