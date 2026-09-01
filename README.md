@@ -12,6 +12,7 @@ For on-call engineers and webhook consumers. It builds an evidence envelope from
 - Removes configured sensitive fields, including nested fields.
 - Records a fingerprint from the fixed source and alert query.
 - Signs the envelope with HMAC-SHA256.
+- Sends Slack the readable summary, bounded redacted evidence, and signature in one request body.
 - Keeps separate delivery routes with their own inbound URLs, destinations, and redaction lists.
 
 SQLite stores route settings, short-lived demo session IDs, and delivery metadata. It does not store inbound bodies or evidence excerpts.

@@ -1127,11 +1127,22 @@ async fn deliver(
             "destination is not configured; the signed envelope was returned to the caller".into(),
         ));
     };
-    let payload = if config.destination_kind == "slack" {
-        json!({ "text": format!("Evidence sealed · {}\n{}\nFirst seen {} · {} items · fingerprint {}", envelope.summary.service, envelope.summary.error_signature, envelope.summary.first_seen, envelope.evidence_items, envelope.query_fingerprint) })
-    } else {
-        serde_json::to_value(envelope).map_err(|e| ApiError::Internal(e.into()))?
-    };
+    let mut payload =
+        serde_json::to_value(envelope).map_err(|error| ApiError::Internal(error.into()))?;
+    if config.destination_kind == "slack" {
+        let text = format!(
+            "Evidence sealed · {}\n{}\nFirst seen {} · {} items · fingerprint {}",
+            envelope.summary.service,
+            envelope.summary.error_signature,
+            envelope.summary.first_seen,
+            envelope.evidence_items,
+            envelope.query_fingerprint
+        );
+        payload
+            .as_object_mut()
+            .expect("an evidence envelope always serializes as an object")
+            .insert("text".into(), Value::String(text));
+    }
     let mut request = state
         .client
         .post(url)
@@ -1625,6 +1636,145 @@ mod tests {
         let bytes = to_bytes(history.into_body(), 100_000).await.unwrap();
         let history_json: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(history_json.as_array().unwrap().len(), 1);
+
+        sink_task.abort();
+    }
+
+    #[tokio::test]
+    async fn claim_slack_destination_carries_bounded_redacted_signed_evidence() {
+        // @claim:slack-delivery
+        type Capture =
+            Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<(HeaderMap, Value)>>>>;
+        async fn capture(
+            State(capture): State<Capture>,
+            headers: HeaderMap,
+            Json(body): Json<Value>,
+        ) -> StatusCode {
+            if let Some(sender) = capture.lock().await.take() {
+                let _ = sender.send((headers, body));
+            }
+            StatusCode::NO_CONTENT
+        }
+
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let capture_state: Capture = Arc::new(tokio::sync::Mutex::new(Some(sender)));
+        let sink = Router::new()
+            .route("/slack", post(capture))
+            .with_state(capture_state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination_url = format!("http://{}/slack", listener.local_addr().unwrap());
+        let sink_task = tokio::spawn(async move { axum::serve(listener, sink).await.unwrap() });
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let signing_key = b"slack-capture-signing-key-at-least-32-bytes";
+        let state = create_state(
+            &format!("sqlite:{}", file.path().display()),
+            signing_key.to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state);
+
+        let config = ChannelConfig {
+            name: "Slack incident route".into(),
+            destination_url: Some(destination_url),
+            destination_kind: "slack".into(),
+            max_items: 1,
+            max_bytes: 1_024,
+            ..Default::default()
+        };
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/config")
+                    .header(
+                        "authorization",
+                        "Bearer test-admin-token-with-at-least-32-characters",
+                    )
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&config).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let alert = json!({
+            "service": "checkout-api",
+            "error": "payment authorization timed out",
+            "startsAt": "2026-09-01T00:00:00Z",
+            "evidence": [
+                {
+                    "message": "safe failure detail",
+                    "email": "private@example.com",
+                    "context": {"token": "private-token"}
+                },
+                {"message": "must be removed by the item cap"}
+            ]
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/relay/primary")
+                    .header(
+                        "x-envelope-token",
+                        "test-inbound-token-with-at-least-32-characters",
+                    )
+                    .header("content-type", "application/json")
+                    .body(Body::from(alert.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+        let (captured_headers, mut captured_body) =
+            tokio::time::timeout(Duration::from_secs(2), receiver)
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(captured_body["text"]
+            .as_str()
+            .unwrap()
+            .contains("Evidence sealed · checkout-api"));
+        assert_eq!(captured_body["evidence_items"], 1);
+        assert!(captured_body["evidence_bytes"].as_u64().unwrap() <= 1_024);
+        assert_eq!(captured_body["truncated"], true);
+        assert_eq!(captured_body["evidence"].as_array().unwrap().len(), 1);
+        assert_eq!(captured_body["evidence"][0]["email"], "[REDACTED]");
+        assert_eq!(
+            captured_body["evidence"][0]["context"]["token"],
+            "[REDACTED]"
+        );
+        let serialized_capture = serde_json::to_string(&captured_body).unwrap();
+        assert!(!serialized_capture.contains("private@example.com"));
+        assert!(!serialized_capture.contains("private-token"));
+        assert!(!serialized_capture.contains("must be removed by the item cap"));
+
+        captured_body.as_object_mut().unwrap().remove("text");
+        let mut captured_envelope: EvidenceEnvelope =
+            serde_json::from_value(captured_body).unwrap();
+        let signature = captured_envelope
+            .signature
+            .strip_prefix("hmac-sha256=")
+            .and_then(|value| hex::decode(value).ok())
+            .expect("Slack body must carry an HMAC-SHA256 signature");
+        assert_eq!(
+            captured_headers
+                .get("x-evidence-envelope-signature")
+                .unwrap(),
+            captured_envelope.signature.as_str()
+        );
+        captured_envelope.signature.clear();
+        let mut mac = Hmac::<Sha256>::new_from_slice(signing_key).unwrap();
+        mac.update(&serde_json::to_vec(&captured_envelope).unwrap());
+        mac.verify_slice(&signature)
+            .expect("the signature carried in the Slack body must verify");
 
         sink_task.abort();
     }
