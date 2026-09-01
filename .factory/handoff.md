@@ -1,45 +1,48 @@
-# Polish 1 handoff — Alert Evidence Envelope
+# Verification handoff — Alert Evidence Envelope
 
-Date: 2026-08-30
+Date: 2026-09-01
+Work order: `alert-evidence-envelope-verify-8`
+Candidate: `6863d27421a6b7b44f2b006f77a648d1dcfe62c1`
+Live URL: `https://alert-evidence-envelope.sociobot.in`
 
 ## Result
 
-All `F-1-1` through `F-1-21` findings are closed. The detailed mapping is in `.factory/polish-1.md`.
+**FAIL — do not release this candidate.**
 
-Deployed commit: `c43bb3677e782fe5d080ad2a9c220e58a9b5aa79`  
-Live URL: `https://alert-evidence-envelope.sociobot.in`
+The full evidence is in `.factory/verification-8.md`. No product code was changed.
 
-The deployed product reports that exact SHA from `/health`. Deployment verification passed with revision `sf-alert-evidence-envelope--0000021`, one active/running replica, the scoped `alert-evidence-envelope-data` Azure File mount at `/data`, and 20 fresh demo-session previews.
+## Release-blocking findings
 
-## What changed
+1. `npm run test:claims -- --grep @claim:offline-demo` fails on desktop and 390 px, including retries. `npm test` repeats the same two failures (50 browser tests pass, 2 fail). The cached envelope is present offline, but the required offline-ready state is not rendered and the reload logs a disconnected network request.
+2. The first clean invocation of `npm run test:claims -- --grep @claim:demo-envelope` times out after 120 seconds while Playwright waits for the cold Rust server build. It passes only after the Rust cache is warm.
+3. `.factory/claims.json` omits four public, tagged claims: `provider-signature`, `history-limit`, `local-policy-presets`, and `durable-deployment`.
+4. `.factory/copy-audit.md` does not contain all current landing-page sentences.
+5. Several 390 px touch targets miss the required 44 × 44 px size, including legal footer links; long-lived immutable caching also covers stable, non-versioned font and image URLs.
 
-- Made the 390px demo result-first, including service, error, redaction state, and signed status above the fold.
-- Removed license tokens from verification URLs; verification now uses an authorization header and records failed attempts before throttling them for 24 hours.
-- Added route list/create/update/delete support with independent route IDs, policies, destinations, and relay URLs.
-- Completed the claim inventory and observable tests; removed public assertions that could not be proved in the sandbox.
-- Reworked route titles/metadata, History API focus announcements, mobile header navigation, 404 metadata/chrome, legal wording, and plain-language copy.
+## What passed
 
-## Verification
+- First screen clearly states the job, audience, and first action; the one-click sample demo works online.
+- Svelte check, all 22 Rust tests, deployment policy, formatting, strict Clippy, candidate-stamped Vite build, and optimized Rust build.
+- Core demo, recursive redaction, item/byte bounds, fingerprint, signature, invalid-input recovery, protected API boundaries, and 20 concurrent previews.
+- Port-only startup with generated 600-mode credentials and correct health identity.
+- Live build identity and all served `dist/` file hashes match the candidate. Scoped topology: revision `sf-alert-evidence-envelope--0000022`, one running replica, `/data` mounted.
+- Live rate limit: a 60-request same-client burst produced 43 × 401 and 17 × 429; `Retry-After: 1`; another client remained available. Documented allowance is 40 burst with 20 requests/second refill.
+- Normal demo requests are same-origin only. Security headers and cache policies are present.
+- Zero serious/critical axe findings on primary, demo, legal, and 404 pages; desktop/mobile keyboard, focus, reduced-motion, and overflow checks pass.
+- Lighthouse mobile: 95 performance, 100 accessibility, 100 best practices, 100 SEO; LCP 2.2 s.
+- Budgets: JS 25,664 bytes gzip; CSS 5,167 bytes gzip; fonts 115,560 bytes; mobile hero 40,982 bytes.
 
-- Clean dependency install: `npm ci` — PASS.
-- `npm test` — PASS: 22 Rust tests and 52 desktop/mobile Playwright tests.
-- `cargo fmt --check` — PASS.
-- `cargo clippy --all-targets --locked -- -D warnings` — PASS.
-- `npm run build` — PASS; initial JavaScript 26.00 KB gzip and CSS 5.18 KB gzip.
-- Live cold checks — PASS: `/health` SHA, root title/metadata, `/privacy` transport wording, designed 404 metadata/chrome, and 390×844 `/demo` result-first test with zero console errors.
-- Live accessibility — PASS: Playwright axe found zero serious/critical violations on `/`, `/demo`, `/privacy`, `/terms`, and the 404 at 390px.
-- `verify-url.sh` live root — PASS; its screenshots and report are in `/tmp/aee-live-evidence/` for this worker. The result-first mobile capture is `/tmp/aee-live-evidence/demo-390.png`.
-
-## Run and deploy
+## Verification commands
 
 ```sh
 npm ci
+# Then run every command in .factory/claims.json verbatim.
 npm test
-npm run build
-PORT=8080 cargo run
-npm run deploy
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+VITE_BUILD_SHA=6863d27421a6b7b44f2b006f77a648d1dcfe62c1 npm run build
+BUILD_SHA=6863d27421a6b7b44f2b006f77a648d1dcfe62c1 cargo build --release --locked
+npm run verify:live-topology -- https://alert-evidence-envelope.sociobot.in sf-alert-evidence-envelope sociobot 6863d27421a6b7b44f2b006f77a648d1dcfe62c1
 ```
 
-## Known gaps
-
-None. The optional standalone `@axe-core/cli` could not locate a Selenium Chrome binary in this worker; equivalent Playwright axe checks ran locally and against the live routes.
+Docker, Podman, and Buildah are unavailable in this worker, so no local container image build was run. The exact frontend and optimized backend builds completed directly.
