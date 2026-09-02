@@ -1,5 +1,6 @@
 use alert_evidence_envelope::{
     api_router, create_state, health, load_or_generate_signing_key, load_or_generate_token,
+    RATE_LIMIT_BURST, RATE_LIMIT_REFILL_MILLIS,
 };
 use anyhow::Context;
 use axum::{
@@ -100,8 +101,8 @@ async fn main() -> anyhow::Result<()> {
     let static_dir = env::var("STATIC_DIR").unwrap_or_else(|_| "dist".into());
     let index = format!("{static_dir}/index.html");
     let governor = GovernorConfigBuilder::default()
-        .per_millisecond(50)
-        .burst_size(40)
+        .per_millisecond(RATE_LIMIT_REFILL_MILLIS)
+        .burst_size(RATE_LIMIT_BURST)
         .key_extractor(SmartIpKeyExtractor)
         .use_headers()
         .finish()

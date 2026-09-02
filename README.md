@@ -12,7 +12,9 @@ For on-call engineers and webhook consumers. It builds an evidence envelope from
 - Removes configured sensitive fields, including nested fields.
 - Records a fingerprint from the fixed source and alert query.
 - Signs the envelope with HMAC-SHA256.
-- Sends Slack the readable summary, bounded redacted evidence, and signature in one request body.
+- Sends a JSON webhook the signed envelope and signature header.
+- Sends Slack the envelope plus a readable `text` field.
+- Sends an email gateway webhook `subject`, `text`, and `envelope` fields.
 - Keeps separate delivery routes with their own inbound URLs, destinations, and redaction lists.
 
 SQLite stores route settings, short-lived demo session IDs, and delivery metadata. It does not store inbound bodies or evidence excerpts.
@@ -27,7 +29,7 @@ npm run build
 PORT=8080 cargo run
 ```
 
-Open `http://localhost:8080`. First boot creates protected signing, admin, and inbound credentials in `data/` (or `/data` when mounted). Set their corresponding environment variables to supply replacements. Enter the admin token in the route builder; incoming alerts send the inbound token in `x-envelope-token`.
+Open `http://localhost:8080`. First boot creates protected signing, admin, and inbound credentials in `data/` (or `/data` when mounted). Set their corresponding environment variables to supply replacements. Enter the admin token in the route builder. Configure alert providers to send the inbound token in `x-envelope-token`.
 
 Each `/api/v1` endpoint is rate limited by the first `X-Forwarded-For` address. `/health` remains available for platform probes.
 
@@ -53,7 +55,7 @@ The container serves the built frontend and Rust API on `PORT`. Durable SQLite s
 
 ## Field Kit
 
-The optional Field Kit costs $39 USD once and adds named redaction presets stored in this browser. Redaction, signing, previews, copying envelopes, and route safety controls stay available without a license.
+The optional Field Kit costs $39 USD once and adds named redaction presets stored in this browser. Redaction, signing, previews, copying envelopes, and route settings stay available without a license.
 
 License tokens are stored in the browser. Verification sends the token to Sociobot in an authorization header, not in a URL. [Privacy](https://alert-evidence-envelope.sociobot.in/privacy) and [Terms](https://alert-evidence-envelope.sociobot.in/terms) explain storage and purchase terms.
 

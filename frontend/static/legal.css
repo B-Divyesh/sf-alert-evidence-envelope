@@ -59,6 +59,7 @@ a:focus-visible {
 .brand,
 .site-header nav a {
   min-height: 44px;
+  min-width: 44px;
   display: inline-flex;
   align-items: center;
 }

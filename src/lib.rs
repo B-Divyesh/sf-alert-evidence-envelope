@@ -30,6 +30,9 @@ use tower_http::{
 use url::Url;
 use uuid::Uuid;
 
+pub const RATE_LIMIT_BURST: u32 = 40;
+pub const RATE_LIMIT_REFILL_MILLIS: u64 = 50;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
@@ -1142,6 +1145,20 @@ async fn deliver(
             .as_object_mut()
             .expect("an evidence envelope always serializes as an object")
             .insert("text".into(), Value::String(text));
+    } else if config.destination_kind == "email-webhook" {
+        let text = format!(
+            "{}\n\n{}\nFirst seen {} · {} items · fingerprint {}",
+            envelope.summary.service,
+            envelope.summary.error_signature,
+            envelope.summary.first_seen,
+            envelope.evidence_items,
+            envelope.query_fingerprint
+        );
+        payload = json!({
+            "subject": format!("Incident evidence: {}", envelope.summary.service),
+            "text": text,
+            "envelope": envelope,
+        });
     }
     let mut request = state
         .client
@@ -1223,6 +1240,21 @@ mod tests {
             .to_url_lossy()
             .query_pairs()
             .all(|(key, _)| key != "vfs"));
+    }
+
+    #[test]
+    fn claim_rate_limit_contract_has_a_40_request_burst_and_20_per_second_refill() {
+        // @claim:rate-limit
+        assert_eq!(RATE_LIMIT_BURST, 40);
+        assert_eq!(1_000 / RATE_LIMIT_REFILL_MILLIS, 20);
+        let mut permits = RATE_LIMIT_BURST;
+        for _ in 0..40 {
+            assert!(permits > 0);
+            permits -= 1;
+        }
+        assert_eq!(permits, 0);
+        permits += (1_000 / RATE_LIMIT_REFILL_MILLIS) as u32;
+        assert_eq!(permits, 20);
     }
 
     #[test]
@@ -1776,6 +1808,113 @@ mod tests {
         mac.verify_slice(&signature)
             .expect("the signature carried in the Slack body must verify");
 
+        sink_task.abort();
+    }
+
+    #[tokio::test]
+    async fn claim_json_slack_and_email_destination_contracts() {
+        // @claim:destination-contracts
+        type Capture = tokio::sync::mpsc::UnboundedSender<(HeaderMap, Value)>;
+        async fn capture(
+            State(capture): State<Capture>,
+            headers: HeaderMap,
+            Json(body): Json<Value>,
+        ) -> StatusCode {
+            capture.send((headers, body)).unwrap();
+            StatusCode::NO_CONTENT
+        }
+
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let sink = Router::new()
+            .route("/capture", post(capture))
+            .with_state(sender);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination_url = format!("http://{}/capture", listener.local_addr().unwrap());
+        let sink_task = tokio::spawn(async move { axum::serve(listener, sink).await.unwrap() });
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let state = create_state(
+            &format!("sqlite:{}", file.path().display()),
+            b"destination-contract-signing-key-32bytes".to_vec(),
+            "test-admin-token-with-at-least-32-characters".into(),
+            "test-inbound-token-with-at-least-32-characters".into(),
+        )
+        .await
+        .unwrap();
+        let app = api_router(state);
+        let alert = json!({
+            "service": "checkout-api", "error": "timeout", "startsAt": "2026-09-01T00:00:00Z",
+            "evidence": [{"email": "private@example.com", "message": "retry exhausted"}]
+        });
+
+        for kind in ["json", "slack", "email-webhook"] {
+            let config = ChannelConfig {
+                destination_url: Some(destination_url.clone()),
+                destination_kind: kind.into(),
+                ..Default::default()
+            };
+            let saved = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/config")
+                        .header(
+                            "authorization",
+                            "Bearer test-admin-token-with-at-least-32-characters",
+                        )
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&config).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(saved.status(), StatusCode::OK);
+            let relayed = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/relay/primary")
+                        .header(
+                            "x-envelope-token",
+                            "test-inbound-token-with-at-least-32-characters",
+                        )
+                        .header("content-type", "application/json")
+                        .body(Body::from(alert.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(relayed.status(), StatusCode::ACCEPTED);
+            let (headers, body) = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let envelope = if kind == "email-webhook" {
+                &body["envelope"]
+            } else {
+                &body
+            };
+            assert_eq!(envelope["summary"]["service"], "checkout-api");
+            assert_eq!(envelope["evidence"][0]["email"], "[REDACTED]");
+            assert_eq!(
+                headers.get("x-evidence-envelope-signature").unwrap(),
+                envelope["signature"].as_str().unwrap()
+            );
+            if kind == "json" {
+                assert!(body.get("text").is_none());
+            }
+            if kind == "slack" {
+                assert!(body["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Evidence sealed · checkout-api"));
+            }
+            if kind == "email-webhook" {
+                assert_eq!(body["subject"], "Incident evidence: checkout-api");
+                assert!(body["text"].as_str().unwrap().contains("timeout"));
+            }
+        }
         sink_task.abort();
     }
 

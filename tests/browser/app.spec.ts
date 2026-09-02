@@ -14,7 +14,7 @@ test('@claim:demo-envelope opens one-click sample and builds a safe envelope', a
   const consoleErrors: string[] = [];
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('Send safe evidence with every alert');
+  await expect(page.locator('h1')).toHaveText('Add redacted evidence to webhook alerts');
   await page.getByRole('link', { name: 'Try it with sample data' }).click();
   await expect(page).toHaveURL(/\/demo$/);
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://alert-evidence-envelope.sociobot.in/demo');
@@ -163,7 +163,7 @@ test('discovers the mobile LCP image before app boot without loading webfonts', 
     if (request.resourceType() === 'font') fontRequests.push(new URL(request.url()).pathname);
   });
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('Send safe evidence with every alert');
+  await expect(page.locator('h1')).toHaveText('Add redacted evidence to webhook alerts');
   await expect(page.getByRole('link', { name: 'Try it with sample data' })).toBeVisible();
   expect(fontRequests).toEqual([]);
   expect(requestOrder.indexOf('/assets/evidence-terrain-960.webp')).toBeGreaterThanOrEqual(0);
@@ -294,16 +294,17 @@ test('keeps every 390px interactive target at least 44 by 44px', async ({ page }
   }
 });
 
-test('@claim:rate-limit limits each forwarded client and returns a useful retry delay', async ({ request }, testInfo) => {
+test('separates forwarded client IP buckets and returns Retry-After', async ({ request }, testInfo) => {
   const octet = testInfo.project.name.startsWith('mobile') ? '44' : '43';
-  const responses = await Promise.all(Array.from({ length: 60 }, () => request.get('/api/v1/config', {
-    headers: { 'x-forwarded-for': `198.51.100.${octet}` },
+  const forwarded = `198.51.100.${octet}, 10.0.0.7`;
+  const burst = await Promise.all(Array.from({ length: 41 }, () => request.get('/api/v1/config', {
+    headers: { 'x-forwarded-for': forwarded },
   })));
-  const limited = responses.filter((response) => response.status() === 429);
-  expect(limited.length).toBeGreaterThan(0);
-  expect(limited[0].headers()['retry-after']).toBe('1');
-  const otherClient = await request.get('/api/v1/config', { headers: { 'x-forwarded-for': `203.0.113.${octet}` } });
-  expect(otherClient.status()).toBe(401);
+  expect(burst.filter((response) => response.status() === 429).length).toBeGreaterThan(0);
+  const firstLimited = burst.find((response) => response.status() === 429);
+  expect(firstLimited?.headers()['retry-after']).toBe('1');
+  const otherFirst = await request.get('/api/v1/config', { headers: { 'x-forwarded-for': `203.0.113.${octet}, 198.51.100.${octet}` } });
+  expect(otherFirst.status()).toBe(401);
 });
 
 test('@claim:field-kit-purchase shows the price and official checkout action', async ({ page }) => {
@@ -320,6 +321,7 @@ test('@claim:local-policy-presets keeps named redaction presets on this device',
   page.on('request', (request) => origins.add(new URL(request.url()).origin));
   await page.addInitScript(() => {
     localStorage.setItem('sb_license:alert-evidence-envelope', 'fixture-license');
+    if (!localStorage.getItem('test:license-clock')) localStorage.setItem('test:license-clock', '1000');
     localStorage.setItem(
       'sb_license:alert-evidence-envelope:verdict',
       JSON.stringify({ valid: true, checkedAt: Date.now() }),
@@ -353,13 +355,50 @@ test('restores a Field Kit license and strips returned tokens from the URL', asy
   expect(await page.evaluate(() => localStorage.getItem('sb_license:alert-evidence-envelope'))).toBe('returned-test-license');
 });
 
-test('@claim:mobile-demo-result shows the transformed envelope above the fold', async ({ page }) => {
+test('@claim:mobile-demo-result shows the complete transformed envelope above the fold', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/demo');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
   for (const text of ['checkout-api', 'payment authorization timed out', '[REDACTED]', 'Envelope signed. Demo data was not stored.']) {
     const box = await page.getByText(text, { exact: text === 'checkout-api' || text === 'payment authorization timed out' }).first().boundingBox();
-    expect(box?.y, text).toBeLessThan(844);
+    expect(box, text).not.toBeNull();
+    expect(box!.y + box!.height, text).toBeLessThanOrEqual(844);
+  }
+  await page.screenshot({ path: testInfo.outputPath('mobile-demo-complete-result.png'), fullPage: false });
+});
+
+test('@claim:demo-route-policies compares isolated sample policies without protected routes', async ({ page }) => {
+  const protectedRequests: string[] = [];
+  page.on('request', (request) => {
+    if (/\/api\/v1\/(?:config|channels|history|preview|relay)/.test(new URL(request.url()).pathname)) protectedRequests.push(request.url());
+  });
+  await page.goto('/demo');
+  await expect(page.getByText('Customer automation removes email, token before delivery.')).toBeVisible();
+  await page.getByText('Inspect signed JSON').click();
+  await expect(page.getByLabel('Signed evidence envelope JSON')).toContainText('"email": "[REDACTED]"');
+  await page.getByRole('button', { name: /Internal Slack/ }).click();
+  await expect(page.getByText('Internal Slack removes token before delivery.')).toBeVisible();
+  await expect(page.getByLabel('Signed evidence envelope JSON')).toContainText('customer@example.com');
+  await expect(page.getByLabel('Signed evidence envelope JSON')).toContainText('"token": "[REDACTED]"');
+  expect(protectedRequests).toEqual([]);
+});
+
+test('@claim:credential-browser-exposure keeps server credential markers out of browser state', async ({ page, request }) => {
+  const markers = [
+    'playwright-signing-key-at-least-32-bytes',
+    'test-admin-token-with-at-least-32-characters',
+    'test-inbound-token-with-at-least-32-characters',
+  ];
+  const response = await request.get('/api/v1/config', {
+    headers: { authorization: 'Bearer test-admin-token-with-at-least-32-characters' },
+  });
+  expect(response.status()).toBe(200);
+  const configJson = await response.text();
+  await page.goto('/');
+  const browserState = await page.evaluate(() => `${document.documentElement.outerHTML}\n${JSON.stringify(localStorage)}`);
+  for (const marker of markers) {
+    expect(configJson).not.toContain(marker);
+    expect(browserState).not.toContain(marker);
   }
 });
 
@@ -375,20 +414,48 @@ test('@claim:license-transport uses an authorization header and never a token UR
   expect(authorization).toBe('Bearer fixture-license-token');
 });
 
-test('@claim:license-throttle waits after a failed verification attempt', async ({ page }) => {
+test('@claim:license-throttle waits 24 hours after each verification attempt', async ({ page }) => {
   let attempts = 0;
   await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify', async (route) => { attempts += 1; await route.abort(); });
   await page.addInitScript(() => localStorage.setItem('sb_license:alert-evidence-envelope', 'fixture-license'));
-  await page.goto('/'); await page.reload();
+  await page.goto('/');
   expect(attempts).toBe(1);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sb_license:alert-evidence-envelope:verdict'))).not.toBeNull();
+  await page.evaluate(() => {
+    const verdict = JSON.parse(localStorage.getItem('sb_license:alert-evidence-envelope:verdict') || '{}');
+    verdict.attemptedAt = Date.now() - 86_399_000;
+    localStorage.setItem('sb_license:alert-evidence-envelope:verdict', JSON.stringify(verdict));
+  });
+  await page.reload();
+  expect(attempts).toBe(1);
+  await page.evaluate(() => {
+    const verdict = JSON.parse(localStorage.getItem('sb_license:alert-evidence-envelope:verdict') || '{}');
+    verdict.attemptedAt = Date.now() - 86_401_000;
+    localStorage.setItem('sb_license:alert-evidence-envelope:verdict', JSON.stringify(verdict));
+  });
+  await page.reload();
+  await expect.poll(() => attempts).toBe(2);
 });
 
-test('@claim:free-core keeps the preview and export action free', async ({ page }) => {
+test('@claim:free-core keeps route settings, previews, signing, and copying free', async ({ page }) => {
   const billingRequests: string[] = [];
   page.on('request', (request) => { if (request.url().includes('api.sociobot.in')) billingRequests.push(request.url()); });
-  await page.goto('/demo');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await page.getByLabel('Route name').fill('Unlicensed route');
+  await page.getByLabel('Accept incoming alerts').check();
+  await page.getByLabel('Query JSON pointer').fill('/query');
+  await page.getByLabel('Embedded evidence pointer').fill('/evidence');
+  await page.getByLabel('Redact keys comma-separated').fill('email, token');
+  await page.getByLabel('Maximum records').fill('1');
+  await page.getByLabel('Maximum envelope bytes').fill('4096');
+  await page.getByLabel('Destination type').selectOption('json');
+  await page.getByRole('button', { name: 'Copy relay URL' }).click();
+  await expect(page.getByText('Relay URL copied')).toBeVisible();
+  await page.getByRole('link', { name: 'Demo' }).click();
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Copy envelope JSON' })).toBeVisible();
+  await page.getByRole('button', { name: 'Copy envelope JSON' }).click();
+  await expect(page.locator('.copy-feedback')).toHaveText('Signed envelope copied');
   await expect(page.getByRole('link', { name: 'Buy the Field Kit' })).not.toBeVisible();
   expect(billingRequests).toEqual([]);
 });

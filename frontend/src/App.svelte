@@ -16,6 +16,11 @@
   const verdictKey = `${licenseKey}:verdict`;
   const demoSessionKey = `demo:${slug}:session`;
   const demoPreviewKey = `demo:${slug}:preview`;
+  const demoRouteKey = `demo:${slug}:route`;
+  const demoRoutes = [
+    { id: 'internal-slack', name: 'Internal Slack', fields: ['token'], destination: 'Slack incoming webhook' },
+    { id: 'customer-automation', name: 'Customer automation', fields: ['email', 'token'], destination: 'JSON webhook' },
+  ];
   const sampleAlert = `{
   "service": "checkout-api",
   "error": "payment authorization timed out",
@@ -54,6 +59,7 @@
   let presetName = '';
   let presets: Preset[] = [];
   let demoSession = '';
+  let demoRoute = demoRoutes[1];
   let routeAnnouncement = '';
 
   onMount(() => {
@@ -62,6 +68,8 @@
     if (online) void loadBuildIdentity();
     window.addEventListener('popstate', () => void setRoute(location.pathname, false));
     if (path === '/demo') {
+      const savedRoute = localStorage.getItem(demoRouteKey);
+      demoRoute = demoRoutes.find((route) => route.id === savedRoute) || demoRoutes[1];
       const cached = localStorage.getItem(demoPreviewKey);
       if (cached) {
         try {
@@ -233,7 +241,7 @@
       preview = await api(endpoint, {
         method: 'POST', body: JSON.stringify({
           alert,
-          redact_fields: redactText.split(',').map((v) => v.trim()).filter(Boolean),
+          redact_fields: path === '/demo' ? demoRoute.fields : redactText.split(',').map((v) => v.trim()).filter(Boolean),
           max_items: config.max_items, max_bytes: config.max_bytes,
         }),
       });
@@ -277,11 +285,18 @@
     }
   }
 
+  async function selectDemoRoute(id: string) {
+    demoRoute = demoRoutes.find((route) => route.id === id) || demoRoutes[0];
+    localStorage.setItem(demoRouteKey, demoRoute.id);
+    await runPreview();
+  }
+
   function leaveDemo() {
     const session = localStorage.getItem(demoSessionKey);
     if (session && online) void fetch(`/api/v1/demo/sessions/${session}`, { method: 'DELETE' });
     localStorage.removeItem(demoSessionKey);
     localStorage.removeItem(demoPreviewKey);
+    localStorage.removeItem(demoRouteKey);
   }
 
   async function copy(value: string, message: string) {
@@ -344,7 +359,7 @@
     {#if path === '/'}
     <a href="/demo" onclick={(event) => navigate(event, '/demo')}>Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
     {:else if path === '/demo'}<a href="/" onclick={(event) => navigate(event, '/', true)}>Start for real</a><a href="/privacy">Privacy</a>
-    {:else}<a href="/">Back to product</a>{/if}
+    {:else}<a href="/">Home</a><a href="/demo">Demo</a><a href="#main" aria-current="page">{path === '/privacy' ? 'Privacy' : 'Terms'}</a>{/if}
   </nav>
   <span class:offline={!online} class="network"><i></i>{online ? 'Browser online' : 'Browser offline'}</span>
 </header>
@@ -366,7 +381,7 @@
     <h2>What the relay stores</h2><p>SQLite stores channel settings, short-lived demo session IDs, and a 20-entry delivery ledger. Demo session rows contain only an ID and expiry time. The relay does not store raw alerts, evidence, or license tokens.</p>
     <h2>Where secrets live</h2><p>Upstream and destination bearer tokens, admin access, and the signing key come from environment variables. Destination and source URLs may be stored in the local SQLite configuration. Browser license tokens and paid policy presets remain in your browser’s local storage.</p>
     <h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification contacts Sociobot when a license is present, at most once per day. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
-    <h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them. For purchase records and refunds, contact Sociobot as merchant of record.</p>
+    <h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them.</p>
     <p class="updated">Effective 27 August 2026</p>
   </article>
 {:else if path === '/terms'}
@@ -374,7 +389,7 @@
     <p class="eyebrow">Terms</p><h1>Terms of use</h1>
     <p class="lede">Alert Evidence Envelope is a transformation and delivery tool. It does not evaluate alerts, replace your incident system, or guarantee delivery.</p>
     <h2>Operator responsibility</h2><p>You are responsible for endpoint authorization, lawful processing, redaction policies, destination access, secret rotation, and testing size limits before production use. Do not place credentials in JSON payloads or browser configuration.</p>
-    <h2>Field Kit license</h2><p>The $39 Field Kit is a one-time license for reusable local policy presets. Sociobot/Dodo is the merchant of record. Refunds are handled there and revoke the license automatically. Accessibility, export, redaction, signing, and all safety controls remain free.</p>
+    <h2>Field Kit license</h2><p>The $39 Field Kit is a one-time license for reusable local policy presets. Redaction, signing, previews, copying, and route settings remain free.</p>
     <h2>Warranty and liability</h2><p>The software is provided “as is,” without warranties. To the extent permitted by law, contributors are not liable for lost data, missed notifications, or indirect damages. Validate the relay in your own environment and retain your source system as the record of truth.</p>
     <h2>Acceptable use</h2><p>Do not use the service to access systems without permission, evade provider controls, or transmit data prohibited by your organization or applicable law.</p>
     <p class="updated">Effective 27 August 2026</p>
@@ -384,7 +399,7 @@
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy">
       <p class="eyebrow">Add evidence to webhook alerts</p>
-      <h1 id="hero-title">Send safe evidence with every alert</h1>
+      <h1 id="hero-title">Add redacted evidence to webhook alerts</h1>
       <p class="lede">For on-call engineers and webhook consumers who need incident context without another dashboard login.</p>
       <div class="hero-actions"><a class="button primary" href="/demo">Try it with sample data</a><a class="button secondary" href="#configure">Configure your route</a></div>
       <p class="action-note">The sample opens a signed, redacted envelope in an isolated workspace.</p>
@@ -392,7 +407,7 @@
     </div>
     <figure class="terrain">
       <picture><source media="(max-width: 700px)" srcset="/assets/evidence-terrain-960.webp" /><img src="/assets/evidence-terrain-1536.webp" width="1536" height="1024" decoding="async" fetchpriority="high" alt="An amber alert path crosses a topographic incident map, passes a redaction mark, and arrives at a sealed green envelope." /></picture>
-      <figcaption><span>BOUNDARY 32 KB</span><span>ROUTE VERIFIED</span></figcaption>
+      <figcaption><span>BOUNDARY 32 KB</span><span>REDACT → SIGN</span></figcaption>
     </figure>
   </section>
 
@@ -411,18 +426,18 @@
     <div class="state-strip" class:error={configState === 'error'} class:success={configState === 'saved'} aria-live="polite"><span></span>{configMessage}</div>
     {#if channels.length}<div class="route-list" aria-label="Delivery routes">{#each channels as channel}<button class:active={channel.id === config.id} type="button" onclick={() => selectRoute(channel.id)}>{channel.name}<small>{channel.id}</small></button>{/each}<button type="button" onclick={createRoute}>Create route</button>{#if config.id !== 'primary'}<button type="button" onclick={deleteRoute}>Delete this route</button>{/if}</div>{/if}
     <form onsubmit={saveConfig}>
-      <fieldset><legend><b>1</b> Name and state</legend>
+      <fieldset><legend><b>1</b> Name and enable the route</legend>
         <div class="form-grid"><label>Route name<input bind:value={config.name} required maxlength="80" /></label><label class="toggle"><input type="checkbox" bind:checked={config.enabled} /><span>Accept incoming alerts</span></label></div>
       </fieldset>
-      <fieldset><legend><b>2</b> Locate evidence</legend>
+      <fieldset><legend><b>2</b> Choose the evidence source</legend>
         <p class="field-help">Leave the source blank when evidence already arrives inside the alert. A remote source receives only <code>?q=…&amp;limit=…</code>.</p>
-        <div class="form-grid"><label>Fixed evidence source URL <span>optional</span><input type="url" bind:value={config.source_url} placeholder="https://logs.internal.example/query" aria-describedby="source-help" /></label><label>Query JSON pointer<input bind:value={config.query_pointer} required pattern="/.*" /></label><label>Embedded evidence pointer<input bind:value={config.evidence_pointer} required pattern="/.*" /></label><label>Upstream token<input value="UPSTREAM_BEARER_TOKEN" disabled /><small id="source-help">Set in the server environment; never entered here.</small></label></div>
+        <div class="form-grid"><label>Fixed evidence source URL <span>optional</span><input type="url" bind:value={config.source_url} placeholder="https://logs.internal.example/query" aria-describedby="source-help" /></label><label>Query JSON pointer<input bind:value={config.query_pointer} required pattern="/.*" aria-describedby="query-help" /><small id="query-help">Path to the query field, for example <code>/query</code>.</small></label><label>Embedded evidence pointer<input bind:value={config.evidence_pointer} required pattern="/.*" /></label><label>Upstream token<input value="UPSTREAM_BEARER_TOKEN" disabled /><small id="source-help">Set in the server environment; never entered here.</small></label></div>
       </fieldset>
-      <fieldset><legend><b>3</b> Set the boundary</legend>
-        <div class="form-grid"><label>Redact keys <span>comma-separated</span><textarea bind:value={redactText} rows="3" required></textarea></label><div class="split"><label>Item cap<input type="number" bind:value={config.max_items} min="1" max="100" required /></label><label>Byte cap<input type="number" bind:value={config.max_bytes} min="1024" max="131072" step="1024" required /></label></div></div>
+      <fieldset><legend><b>3</b> Limit and redact evidence</legend>
+        <div class="form-grid"><label>Redact keys <span>comma-separated</span><textarea bind:value={redactText} rows="3" required></textarea></label><div class="split"><label>Maximum records<input type="number" bind:value={config.max_items} min="1" max="100" required /></label><label>Maximum envelope bytes<input type="number" bind:value={config.max_bytes} min="1024" max="131072" step="1024" required /></label></div></div>
       </fieldset>
-      <fieldset><legend><b>4</b> Address the envelope</legend>
-        <div class="form-grid"><label>Destination type<select bind:value={config.destination_kind}><option value="json">Automation webhook</option><option value="slack">Slack incoming webhook</option><option value="email-webhook">Email gateway webhook</option></select></label><label>Destination URL <span>optional if set by environment</span><input type="url" bind:value={config.destination_url} placeholder="https://hooks.example/…" /></label><label>Service JSON pointer<input bind:value={config.service_pointer} required pattern="/.*" /></label><label>Error JSON pointer<input bind:value={config.error_pointer} required pattern="/.*" /></label><label>First-seen JSON pointer<input bind:value={config.time_pointer} required pattern="/.*" /></label><label>Admin token <span>read from the relay host</span><input type="password" bind:value={adminToken} autocomplete="off" /></label></div>
+      <fieldset><legend><b>4</b> Choose the delivery destination</legend>
+        <div class="form-grid"><label>Destination type<select bind:value={config.destination_kind}><option value="json">JSON webhook</option><option value="slack">Slack incoming webhook</option><option value="email-webhook">Email gateway webhook</option></select><small>JSON receives the envelope. Slack adds a readable <code>text</code> field. Email gateways receive <code>subject</code>, <code>text</code>, and <code>envelope</code>.</small></label><label>Destination URL <span>optional if set by environment</span><input type="url" bind:value={config.destination_url} placeholder="https://hooks.example/…" /></label><label>Service JSON pointer<input bind:value={config.service_pointer} required pattern="/.*" /></label><label>Error JSON pointer<input bind:value={config.error_pointer} required pattern="/.*" /></label><label>First-seen JSON pointer<input bind:value={config.time_pointer} required pattern="/.*" /></label><label>Admin token <span>read from the relay host</span><input type="password" bind:value={adminToken} autocomplete="off" /></label></div>
         <button class="copy load-route" type="button" onclick={loadConfig} disabled={configState === 'loading'}>{configState === 'loading' ? 'Loading route…' : 'Load protected route'}</button>
       </fieldset>
       <div class="form-actions"><button class="button primary" type="submit" disabled={configState === 'saving'}>{configState === 'saving' ? 'Saving route…' : 'Save route'}</button><code>POST {typeof location === 'undefined' ? '' : location.origin}/api/v1/relay/{config.id}</code><button class="copy" type="button" onclick={() => copy(`${location.origin}/api/v1/relay/${config.id}`, 'Relay URL copied')}>Copy relay URL</button><small>Incoming requests must send the server’s <code>x-envelope-token</code>.</small></div>
@@ -432,22 +447,24 @@
 {/if}
 
   <section id="test" class="test-bench" aria-labelledby="test-title">
-    <div class="section-heading"><p class="eyebrow">Safe preview</p>{#if path === '/demo'}<h1 id="test-title">Inspect a sample evidence envelope</h1><p>The sample runs automatically in an isolated workspace. It never changes the protected route.</p>{:else}<h2 id="test-title">Inspect an envelope before delivery</h2><p>Preview applies the live route’s bounds, redaction, fingerprint, and signature. It does not add delivery history.</p>{/if}</div>
+    <div class="section-heading"><p class="eyebrow">Envelope preview</p>{#if path === '/demo'}<h1 id="test-title">Inspect a sample evidence envelope</h1><p>The sample runs automatically in an isolated workspace. It never changes the protected route.</p>{:else}<h2 id="test-title">Inspect an envelope before delivery</h2><p>Preview applies the live route’s bounds, redaction, fingerprint, and signature. It does not add delivery history.</p>{/if}</div>
     <div class="bench-grid">
-      <div><label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build signed preview'}</button></div>
-      <div class="envelope-output" aria-busy={previewState === 'loading'}>
+      <div>{#if path === '/demo'}<div class="demo-routes" aria-label="Sample routes">{#each demoRoutes as route}<button type="button" class:active={demoRoute.id === route.id} onclick={() => selectDemoRoute(route.id)}><b>{route.name}</b><span>{route.destination} · removes {route.fields.join(' and ')}</span></button>{/each}</div>{/if}<label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build signed preview'}</button></div>
+      <div class="envelope-output" class:demo-output={path === '/demo'} aria-busy={previewState === 'loading'}>
         {#if previewState === 'idle'}<div class="empty"><svg aria-hidden="true" viewBox="0 0 64 64"><path d="M9 18h46v32H9zM10 20l22 17 22-17"/><path d="M24 12c5-5 11-5 16 0"/></svg><h3>No envelope yet</h3><p>Use the sample as-is or paste a realistic alert with sensitive values removed.</p></div>
         {:else if previewState === 'loading'}<div class="empty"><div class="loader" aria-hidden="true"></div><h3>Building the envelope</h3><p>Bounding → redacting → fingerprinting → signing</p></div>
         {:else if previewState === 'error'}<div class="empty error-panel"><b>Preview stopped</b><p>{previewMessage}</p><button type="button" onclick={() => sample = sampleAlert}>Restore valid sample</button></div>
         {:else}
           <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
           {#if path === '/demo'}<p class="demo-sealed" aria-live="polite">{previewMessage}</p>{/if}
-          <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
           <p class="redaction-result"><b>Sensitive fields</b> [REDACTED]</p>
+          {#if path === '/demo'}<p class="demo-route-result"><b>{demoRoute.name}</b> removes {preview.redacted_fields.join(', ')} before delivery.</p>{/if}
+          <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
           <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
           <p class="fingerprint"><span>Query fingerprint</span><code>{preview.query_fingerprint}</code></p>
           <details><summary>Inspect signed JSON</summary><!-- svelte-ignore a11y_no_noninteractive_tabindex (the bounded scroll region must accept keyboard focus) --><pre tabindex="0" aria-label="Signed evidence envelope JSON">{JSON.stringify(preview, null, 2)}</pre></details>
           <button class="copy" type="button" onclick={() => copy(JSON.stringify(preview, null, 2), 'Signed envelope copied')}>Copy envelope JSON</button>
+          <p class="copy-feedback" aria-live="polite">{copyMessage}</p>
         {/if}
         {#if !(path === '/demo' && previewState === 'success')}<p class:bad={previewState === 'error'} class="bench-status" aria-live="polite">{previewMessage}</p>{/if}
       </div>
@@ -463,7 +480,7 @@
   </section>
 
   <section id="field-kit" class="field-kit" aria-labelledby="kit-title">
-    <div><p class="eyebrow">Optional local presets</p><h2 id="kit-title">Reuse redaction policies</h2><p>The self-hosted relay and its safety controls are free. The <strong>$39 Field Kit</strong> is a one-time purchase.</p><p>It adds named redaction presets on this device.</p><ul><li>Named policies for Slack, customers, and automation</li><li>Apply a policy before saving a route</li><li>No subscription or hosted data dependency</li></ul><p class="merchant">Sociobot/Dodo is the merchant of record. Refunds are handled there.</p></div>
+    <div><p class="eyebrow">Optional local presets</p><h2 id="kit-title">Reuse redaction policies</h2><p>Redaction, signing, previews, copying, and route settings are free. The <strong>$39 Field Kit</strong> is a one-time purchase.</p><p>It adds named redaction presets on this device.</p><ul><li>Named policies for Slack, customers, and automation</li><li>Apply a policy before saving a route</li><li>Checkout is hosted by Sociobot</li></ul></div>
     <div class="license-card" class:unlocked>
       <span class="license-state">{unlocked ? '✓ LICENSE ACTIVE' : 'FIELD KIT · $39 ONCE'}</span>
       {#if unlocked}
