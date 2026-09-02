@@ -224,9 +224,22 @@
     } catch (error) { configMessage = error instanceof Error ? error.message : 'Could not load the route'; }
   }
 
+  function optionalUrl(value: string) {
+    return value.trim() || null;
+  }
+
   async function createRoute() {
     try {
-      const created = await api('/api/v1/channels', { method: 'POST', body: JSON.stringify({ ...config, id: '', name: 'New delivery route' }) });
+      const created = await api('/api/v1/channels', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...config,
+          id: '',
+          name: 'New delivery route',
+          source_url: optionalUrl(config.source_url),
+          destination_url: optionalUrl(config.destination_url),
+        }),
+      });
       channels = [...channels, created];
       await selectRoute(created.id);
     } catch (error) { configMessage = error instanceof Error ? error.message : 'Could not create a route'; }
@@ -245,8 +258,8 @@
     event.preventDefault(); configState = 'saving'; configMessage = 'Checking and saving the route…';
     const outgoing = {
       ...config,
-      source_url: config.source_url.trim() || null,
-      destination_url: config.destination_url.trim() || null,
+      source_url: optionalUrl(config.source_url),
+      destination_url: optionalUrl(config.destination_url),
       redact_fields: redactText.split(',').map((v) => v.trim()).filter(Boolean),
     };
     try {

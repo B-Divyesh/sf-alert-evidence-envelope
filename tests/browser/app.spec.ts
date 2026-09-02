@@ -411,6 +411,51 @@ test('@claim:credential-browser-exposure keeps server credential markers out of 
   }
 });
 
+test('creates and reloads an authenticated route with both optional URLs blank', async ({ page, request }) => {
+  const adminToken = 'test-admin-token-with-at-least-32-characters';
+  let createdId = '';
+
+  try {
+    await page.goto('/');
+    await page.getByLabel(/Admin token/).fill(adminToken);
+    await page.getByRole('button', { name: 'Load protected route' }).click();
+    await expect(page.getByText('Route loaded from this relay', { exact: true })).toBeVisible();
+    await expect(page.getByLabel(/Fixed evidence source URL/)).toHaveValue('');
+    await expect(page.getByLabel(/Destination URL/)).toHaveValue('');
+
+    const responsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/v1/channels');
+    await page.getByRole('button', { name: 'Create route' }).click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toMatchObject({
+      source_url: null,
+      destination_url: null,
+    });
+    const created = await response.json();
+    createdId = created.id;
+    await expect(page.getByText(`Editing New delivery route. Each route has its own inbound URL and redaction list.`)).toBeVisible();
+
+    await page.reload();
+    await page.getByLabel(/Admin token/).fill(adminToken);
+    await page.getByRole('button', { name: 'Load protected route' }).click();
+    await expect(page.getByText('Route loaded from this relay', { exact: true })).toBeVisible();
+    const reloadedRoute = page.locator('[aria-label="Delivery routes"] button').filter({ hasText: createdId });
+    await expect(reloadedRoute).toBeVisible();
+    await reloadedRoute.click();
+    await expect(page.getByText(`Editing New delivery route. Each route has its own inbound URL and redaction list.`)).toBeVisible();
+    await expect(page.getByLabel(/Fixed evidence source URL/)).toHaveValue('');
+    await expect(page.getByLabel(/Destination URL/)).toHaveValue('');
+  } finally {
+    if (createdId) {
+      await request.delete(`/api/v1/channels/${createdId}`, {
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+    }
+  }
+});
+
 test('@claim:license-transport uses an authorization header and never a token URL', async ({ page }) => {
   let seenUrl = ''; let authorization = '';
   await page.route('https://api.sociobot.in/api/v1/products/alert-evidence-envelope/verify', async (route) => {
