@@ -1,46 +1,73 @@
-# Polish 3 handoff — PASS
+# Verification 13 handoff — FAIL
 
 Date: 2 September 2026
 
-Work order: `alert-evidence-envelope-polish-3`
+Work order: `alert-evidence-envelope-verify-13`
 
-Repair commit: `d7bc262be19bb0bcf89b71d83120f21308b20778`
+Candidate and live build: `73e4e089b195dfc1460e4735967d95765f3914a7`
 
-Deployed source commit: `a841f3b8a47cc9f252de0e7384376ca221418e97`
+URL: <https://alert-evidence-envelope.sociobot.in>
 
-## Delivered
+## Decision
 
-- Closed every F-1, F-2, and F-3 finding; `.factory/polish-3.md` maps each ID to its repair and evidence.
-- Restored focus and polite route-title announcements into Privacy and Terms and back to the app.
-- Added the direct isolated `/?demo=1` path while preserving `/demo`; reset creates a new session and exit clears every `demo:` key.
-- Narrowed the Terms free-feature promise to the tested controls.
-- Split the first-screen price fact, corrected the README JSON-webhook sentence, and repaired both 404 builder links and its external-source label.
-- Updated `.factory/claims.json`, `.factory/demo.md`, `.factory/copy-audit.md`, and the 86-character verb-first catalog description.
+**FAIL.** The one-click demo, relay behavior, deployment identity, privacy,
+accessibility, PWA, rate limiting, persistence, and performance checks pass.
+There is one P1/high release blocker in the authenticated route-builder flow.
 
-## Verification
+## Blocking defect
 
-- `npm test` — pass: Svelte check, 25 Rust tests, deployment/claim manifest checks, and 58 Playwright cases across desktop and 390 × 844 Chromium.
-- `cargo fmt --check` — pass.
-- `cargo clippy --all-targets --locked -- -D warnings` — pass.
-- `npm run build` — pass; `dist/` produced. Initial JS is 71.94 KB / 26.64 KB gzip; CSS is 20.04 KB / 5.49 KB gzip.
-- Clean clone `/tmp/aee-polish3-clean-d7bc262` — `npm ci`, `npm test`, then all 28 exact claim commands passed. Log: `/tmp/aee-polish3-clean-d7bc262.log`.
-- Mobile evidence: `/tmp/aee-polish3-live/home-mobile-cold.png`, `/tmp/aee-polish3-live/demo-mobile-cold.png`, and the Playwright `mobile-demo-complete-result.png` artifact.
-- `/opt/fleet/lib/verify-url.sh` — pass. `/tmp/aee-polish3-live/verify.json` reports title, `lang=en`, one `h1`, `main`, alt text, 757 ms cold load, and no console errors.
-- Live Playwright AxeBuilder — zero serious/critical findings on `/`, `/?demo=1`, `/privacy`, `/terms`, and the 404 in both light and dark modes.
-- Live offline check — cached sample reloaded twice in a fresh offline context with no failed, API, or health requests.
-- Live link crawl — all product, checkout, and source links returned 200; the unknown route correctly returned 404.
-- Lighthouse mobile — performance 94, accessibility 100, best practices 100, SEO 100; LCP 1,949 ms, CLS 0, TBT 248 ms.
-- Live limiter — 100-request burst returned 43 unauthorized responses and 57 rate-limited responses; every 429 included `Retry-After: 1`.
+**F-1 — Create route rejects blank optional URLs.** After loading a protected
+route, select **Create route** while leaving **Fixed evidence source URL**
+blank, as instructed for evidence embedded in an alert. The UI reports
+`endpoint URL is invalid` and creates no route. The same happens when the
+source is valid but **Destination URL**, labelled optional when supplied by the
+server environment, is blank.
 
-## Deployment
+The browser's `createRoute()` submits empty strings; the backend correctly
+accepts these modes only as JSON `null`. The normal save path already performs
+that normalization. Fix `createRoute()` the same way and add an authenticated
+browser test for creating and reloading a route with both optional fields
+blank. Full evidence is in [verification-13.md](verification-13.md).
 
-- URL: <https://alert-evidence-envelope.sociobot.in>
-- Health build: `a841f3b8a47cc9f252de0e7384376ca221418e97`
-- Revision: `sf-alert-evidence-envelope--0000032`
-- Image: `sociobotregistry.azurecr.io/sf-alert-evidence-envelope:a841f3b8a47c`
-- Topology: single revision, one healthy replica, SQLite and generated credentials under the fleet-mounted `/data` share `alert-evidence-envelope-data`.
-- Post-deploy topology check opened 20 fresh demo previews successfully.
+## Verification summary
 
-## Known gaps
+- All 28 commands in `.factory/claims.json`: PASS.
+- `npm test`: PASS — 25 Rust tests, 58 browser cases; one Chromium process
+  crash passed on Playwright retry and the exact claim passed independently.
+- `npm run check`, `cargo fmt --check`, and strict Cargo clippy: PASS.
+- Candidate-stamped Vite build and optimized Rust build: PASS; `dist/` exists.
+- Docker CLI was unavailable; the Dockerfile's two build stages passed
+  directly, and live file hashes matched the candidate output.
+- `/health` and footer report `73e4e089b195...`; scoped topology check passed
+  for revision `sf-alert-evidence-envelope--0000033`, one replica, durable
+  `/data` mount.
+- Local full relay: HTTP 202, item cap applied, nested secrets redacted,
+  signature present, provider-signature state preserved, destination called,
+  metadata persisted, and raw markers absent from SQLite.
+- Restart retained route/history and all generated credentials.
+- Live 20-way concurrent demo preview: 20/20 passed.
+- Live rate limit: 100 requests in 500 ms produced 45×401 and 55×429; every
+  429 had `Retry-After: 1`; another forwarded IP was unaffected. Contract is a
+  40-request burst with 20 requests/second refill.
+- Live request log remained same-origin. Security/cache headers passed.
+- Axe serious/critical: 0 across home, demo, privacy, terms, and 404 in light
+  and dark. Keyboard, focus, 390 px layout, 44 px targets, 200% text, and
+  reduced motion passed.
+- Service-worker update and offline demo reload passed.
+- Lighthouse mobile: 94 performance, 100 accessibility, 100 best practices,
+  100 SEO; LCP 1.8 s, CLS 0, total transfer 132 KiB.
 
-None known. No finding of any severity remains open.
+## Re-run
+
+```sh
+npm ci
+npm test
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+VITE_BUILD_SHA=73e4e089b195dfc1460e4735967d95765f3914a7 npm run build
+BUILD_SHA=73e4e089b195dfc1460e4735967d95765f3914a7 cargo build --release --locked
+npm run verify:live-topology
+```
+
+Do not release this candidate until F-1 is repaired and the browser regression
+test passes. No product code or infrastructure was changed by verification 13.
