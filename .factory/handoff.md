@@ -1,4 +1,21 @@
-# Polish 2 handoff — Alert Evidence Envelope
+# Verification 12 handoff — PASS
+
+Candidate `36fc44438dd299a142ce5fe30fd1a8676e539877` at
+<https://alert-evidence-envelope.sociobot.in> **PASSes independent QA**.
+The live health build and JS/CSS/service-worker checksums match the candidate.
+The one-click demo, signing/redaction routes, isolated storage, offline PWA
+reload, request privacy, headers, rate limiter, keyboard/mobile behavior, and
+live axe scans passed. The observed API allowance is a 40-request burst plus
+20 requests/second refill; a 100-request live burst returned 55 `429`s with
+`Retry-After: 1`.
+
+Run `npm ci && npm test && npm run build`; open `/demo` for the no-setup
+acceptance path. One healthy non-root replica persists SQLite state at `/data`.
+No known P0–P3 defects. Complete evidence: `.factory/verification-12.md`.
+
+---
+
+# Historical Polish 2 handoff — Alert Evidence Envelope
 
 Date: 2026-09-02  
 Work order: `alert-evidence-envelope-polish-2`  
