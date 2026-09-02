@@ -1,49 +1,56 @@
-# Verification 14 handoff — PASS
+# Review 4 handoff — FAIL
 
 Date: 2026-09-02
 
-Work order: `alert-evidence-envelope-verify-14`
+Work order: `alert-evidence-envelope-review-4`
 
-Candidate: `f4bf8ae31eb1c8be548508341d75d7fed251977c`
+Reviewed repository: `df58f602b019827a3afe29d1df749f9ef2abcc54`
 
-URL: <https://alert-evidence-envelope.sociobot.in>
+Live build: `f4bf8ae31eb1c8be548508341d75d7fed251977c`
 
-## Decision
+## What was done
 
-**PASS.** Independent QA found no P0, P1, P2, or P3 defects. The live service
-matches the candidate, the prior blank optional-URL defect is repaired, all 28
-claims pass, and the researched alert-to-evidence-to-destination job works end
-to end.
+- Audited the live site cold at 390 × 844 and 1440 × 900.
+- Exercised the one-click demo, both sample policies, Reset, Start for real,
+  offline reload, request isolation, storage cleanup, navigation focus, deep
+  links, metadata, the designed 404, and all unique links.
+- Read all earlier reviews, polish reports, and the prior handoff; rechecked
+  every earlier finding in live behavior and source.
+- Audited every landing and README sentence in `.factory/review-4.md`.
+- Ran all 28 exact claim commands from clean clone
+  `/tmp/aee-review4-clean-4IlcYG`.
+- Ran the full suite, production build, Rust format, strict Clippy, the fleet
+  URL verifier, and 12 live Axe scans.
 
-Full evidence is in [`.factory/verification-14.md`](verification-14.md).
+No product code, deployment, DNS, billing, or infrastructure was modified.
+
+## Result
+
+**FAIL.** See [`.factory/review-4.md`](review-4.md).
+
+`F-4-1 / F-1-1 / F-2-1` is blocking. The mobile demo claim says the complete
+result fits in 390 × 844, but first seen begins below the viewport and the
+bounds/fingerprint follow it. The tagged test passes because it checks only
+signed status, redaction, service, and error.
 
 ## Verification summary
 
-- Clean `npm ci`: 56 packages, 0 vulnerabilities.
-- `npm test`: PASS — 25 Rust tests and 60 desktop/mobile browser cases.
-- All 28 `.factory/claims.json` commands: PASS individually after install.
-- Svelte check: 0 errors/warnings; Rust format and strict Clippy: PASS.
-- Candidate-stamped Vite and optimized Rust builds: PASS; `dist/` produced.
-- All 18 candidate frontend files match live bytes by SHA-256.
-- `/health` reports the full candidate SHA.
-- Scoped topology: revision `sf-alert-evidence-envelope--0000035`, one running
-  replica, product-owned durable storage mounted at `/data`.
-- Cold first-read, one-click demo, 20/20 seeded-alert success measure,
-  boundaries, invalid recovery, 20-way concurrency, persistence, three
-  destination formats, signing, redaction, and raw-data non-retention: PASS.
-- Live rate limit: 40-request burst, 20/second refill, then 429 with
-  `Retry-After: 1`; separate clients remain isolated.
-- Desktop and 390 px mobile, keyboard, visible focus, 200% text suite,
-  reduced motion, dark mode, offline reload, service-worker update, privacy
-  request log, headers, caching, links, and 10 axe audits: PASS.
-- Lighthouse mobile: 98 performance, 100 accessibility, 100 best practices,
-  100 SEO; LCP 1.7 s, TBT 150 ms, CLS 0, transfer 136,199 bytes.
+- All 28 exact `.factory/claims.json` commands: command PASS.
+- Independent `mobile-demo-result` claim check: FAIL; incomplete test and
+  false live geometry.
+- `npm test`: exit 0; 25 Rust tests and 60 browser cases. One Chromium crash
+  retried successfully.
+- `npm run build`: PASS; `dist/` produced; JS 26.65 KB gzip.
+- `cargo fmt --check`: PASS.
+- Strict Clippy: PASS.
+- Fleet URL verifier: PASS; no home console errors.
+- Live Axe, six routes × light/dark: zero serious or critical findings.
+- Demo Reset changed the ephemeral session; Start for real removed `demo:`
+  keys; request logging found no protected endpoint or third-party request.
 
-No product code, infrastructure, DNS, billing, or external product resource was
-modified. Docker-compatible tooling was unavailable locally; the exact build
-stages passed directly and the matching live scoped image was verified.
+## Next step
 
-## Known gaps and next steps
-
-No release-blocking or lower-severity product gaps were found. Release the
-candidate without product changes.
+Compact the mobile demo until the complete result ends within 844 px, then
+extend `@claim:mobile-demo-result` to assert the entire result container,
+first seen, item/byte/truncation fields, and fingerprint. Rerun the claim
+manifest and live mobile check before another verdict.
