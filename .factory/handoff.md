@@ -23,7 +23,13 @@ Repair commit: `43f47000fe5ef77ec4e1a9414476314ab575ab82`
 
 ## Deploy and live recheck
 
-Deployment and cold live recheck are the next work-order steps. This section will record the live revision, build SHA, URL checks, axe result, and topology evidence after deployment.
+- Deployed `sociobotregistry.azurecr.io/sf-alert-evidence-envelope:724367156d40` on `sf-alert-evidence-envelope--0000029`.
+- `npm run verify:live-topology -- https://alert-evidence-envelope.sociobot.in sf-alert-evidence-envelope sociobot 724367156d402ed4a42a79e741432fa4465d23de alert-evidence-envelope-data` — pass: single active/healthy replica, `/data` Azure File mount, 20 fresh demo previews, live `/health` build `724367156d402ed4a42a79e741432fa4465d23de`.
+- Cold `/opt/fleet/lib/verify-url.sh` evidence is in `/tmp/aee-live-IlGKwK`: 200 home page; title, `lang=en`, one h1, main landmark, image alt text, and no console errors. It wrote desktop/mobile screenshots and `verify.json`.
+- Cold URL checks: `/`, `/demo`, `/privacy`, and `/terms` returned 200; `/not-a-real-route` returned 404.
+- Live Playwright axe scans at 390 × 844 found zero serious/critical violations on home, demo, privacy, terms, and 404.
+- Live mobile demo check passed: all required completed-result boxes ended within the 844 px viewport; Internal Slack route showed token-only redaction while retaining the sample email; no console errors.
+- `npx @axe-core/cli` could not locate its Selenium Chrome binary in this worker. The equivalent Playwright AxeBuilder scan used the installed Playwright browser and passed all five live routes.
 
 ## Known gaps
 
