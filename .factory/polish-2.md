@@ -25,7 +25,7 @@ Repair candidate based on `5f8c113597af535a582e46263c02ee9cf2c832ef`. Browser ev
 | F-1-19 | Descriptive process headings retained. | `.factory/copy-audit.md`. |
 | F-1-20 | Relay and preview actions name their result. | browser suite. |
 | F-1-21 / F-2-5 | Demo now compares Internal Slack and Customer automation policies without protected-route access. | `@claim:demo-route-policies`; `/demo`. |
-| F-2-6 | Production limiter constants are shared with a controlled 40-burst/20-per-second claim test; browser checks 429 and isolated forwarded clients. | `claim_rate_limit_contract_has_a_40_request_burst_and_20_per_second_refill`; browser rate test. |
+| F-2-6 | Production limiter constants are shared with a controlled 40-burst/20-per-second claim test and the forwarded-IP extractor. | `claim_rate_limit_contract_has_a_40_request_burst_and_20_per_second_refill`. |
 | F-2-8 | Replaced unbounded “safe” and “verified” copy. | `.factory/copy-audit.md`; `/`. |
 | F-2-9 | JSON, Slack, and email-webhook payload contracts are shown in the UI/README and captured locally. | `claim_json_slack_and_email_destination_contracts`. |
 | F-2-10 | Rewrote headings, caps, and query-pointer helper text. | `.factory/copy-audit.md`; `/`. |

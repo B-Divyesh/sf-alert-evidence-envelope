@@ -14,7 +14,7 @@ Repair commit: `43f47000fe5ef77ec4e1a9414476314ab575ab82`
 
 ## Verification
 
-- `npm test` — pass: Svelte check, 25 Rust tests, deployment policy, 28-claim manifest, and 58 Playwright desktop/mobile tests.
+- `npm test` — pass: Svelte check, 25 Rust tests, deployment policy, 28-claim manifest, and 56 Playwright desktop/mobile tests.
 - `cargo fmt --check` — pass.
 - `cargo clippy --all-targets --locked -- -D warnings` — pass.
 - `npm run build` — pass; initial JavaScript gzip is 26.42 KB and CSS gzip is 5.49 KB.

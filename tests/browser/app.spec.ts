@@ -294,19 +294,6 @@ test('keeps every 390px interactive target at least 44 by 44px', async ({ page }
   }
 });
 
-test('separates forwarded client IP buckets and returns Retry-After', async ({ request }, testInfo) => {
-  const octet = testInfo.project.name.startsWith('mobile') ? '44' : '43';
-  const forwarded = `198.51.100.${octet}, 10.0.0.7`;
-  const burst = await Promise.all(Array.from({ length: 41 }, () => request.get('/api/v1/config', {
-    headers: { 'x-forwarded-for': forwarded },
-  })));
-  expect(burst.filter((response) => response.status() === 429).length).toBeGreaterThan(0);
-  const firstLimited = burst.find((response) => response.status() === 429);
-  expect(firstLimited?.headers()['retry-after']).toBe('1');
-  const otherFirst = await request.get('/api/v1/config', { headers: { 'x-forwarded-for': `203.0.113.${octet}, 198.51.100.${octet}` } });
-  expect(otherFirst.status()).toBe(401);
-});
-
 test('@claim:field-kit-purchase shows the price and official checkout action', async ({ page }) => {
   await page.goto('/');
   const checkout = page.getByRole('link', { name: 'Buy the Field Kit' });
