@@ -1,6 +1,6 @@
 # Demo sandbox
 
-Open `https://alert-evidence-envelope.sociobot.in/demo`, or select **Try it with sample data** on the first screen.
+Open `https://alert-evidence-envelope.sociobot.in/?demo=1`, or select **Try it with sample data** on the first screen. `/demo` remains a supported direct route.
 
 The demo creates a random server workspace that expires after 24 hours. Its identifier and last rendered envelope use the browser keys `demo:alert-evidence-envelope:session` and `demo:alert-evidence-envelope:preview`.
 

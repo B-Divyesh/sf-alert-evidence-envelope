@@ -17,6 +17,7 @@
   const demoSessionKey = `demo:${slug}:session`;
   const demoPreviewKey = `demo:${slug}:preview`;
   const demoRouteKey = `demo:${slug}:route`;
+  const routeFocusKey = `${slug}:route-focus-pending`;
   const demoRoutes = [
     { id: 'internal-slack', name: 'Internal Slack', fields: ['token'], destination: 'Slack incoming webhook' },
     { id: 'customer-automation', name: 'Customer automation', fields: ['email', 'token'], destination: 'JSON webhook' },
@@ -32,7 +33,15 @@
   ]
 }`;
 
-  let path = typeof location === 'undefined' ? '/' : location.pathname;
+  function routePath(value: string) {
+    if (typeof location === 'undefined') return '/';
+    const url = new URL(value, location.origin);
+    return url.pathname === '/demo' || (url.pathname === '/' && url.searchParams.get('demo') === '1')
+      ? '/demo'
+      : url.pathname;
+  }
+
+  let path = typeof location === 'undefined' ? '/' : routePath(location.href);
   let online = typeof navigator === 'undefined' ? true : navigator.onLine;
   let buildId = import.meta.env.VITE_BUILD_SHA || 'development';
   let config: Config = {
@@ -62,11 +71,43 @@
   let demoRoute = demoRoutes[1];
   let routeAnnouncement = '';
 
+  function markCrossDocumentNavigation() {
+    sessionStorage.setItem(routeFocusKey, 'true');
+  }
+
+  async function focusAndAnnounceRoute() {
+    await tick();
+    const heading = document.querySelector<HTMLElement>('main h1');
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.focus();
+    routeAnnouncement = document.title;
+    window.scrollTo(0, 0);
+  }
+
+  function restoreCrossDocumentFocus(event?: PageTransitionEvent) {
+    const pending = sessionStorage.getItem(routeFocusKey) === 'true';
+    if (!pending && !event?.persisted) return;
+    sessionStorage.removeItem(routeFocusKey);
+    void focusAndAnnounceRoute();
+  }
+
+  function handlePopState() {
+    void setRoute(location.href, false);
+  }
+
+  function handlePageShow(event: PageTransitionEvent) {
+    restoreCrossDocumentFocus(event);
+  }
+
   onMount(() => {
     online = navigator.onLine;
     updateMetadata();
     if (online) void loadBuildIdentity();
-    window.addEventListener('popstate', () => void setRoute(location.pathname, false));
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('pagehide', markCrossDocumentNavigation);
+    window.addEventListener('pageshow', handlePageShow);
+    restoreCrossDocumentFocus();
     if (path === '/demo') {
       const savedRoute = localStorage.getItem(demoRouteKey);
       demoRoute = demoRoutes.find((route) => route.id === savedRoute) || demoRoutes[1];
@@ -93,7 +134,9 @@
     window.addEventListener('online', updateOnline);
     window.addEventListener('offline', updateOnline);
     return () => {
-      window.removeEventListener('popstate', () => void setRoute(location.pathname, false));
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('pagehide', markCrossDocumentNavigation);
+      window.removeEventListener('pageshow', handlePageShow);
       window.removeEventListener('online', updateOnline);
       window.removeEventListener('offline', updateOnline);
     };
@@ -119,15 +162,13 @@
   }
 
   async function setRoute(next: string, push = true) {
-    if (next === path) return;
+    const nextPath = routePath(next);
+    if (nextPath === path && new URL(next, location.origin).href === location.href) return;
     if (push) history.pushState({}, '', next);
-    path = next;
+    path = nextPath;
     updateMetadata();
     if (path === '/demo') await startDemo(false);
-    await tick();
-    const heading = document.querySelector<HTMLElement>('main h1');
-    if (heading) { heading.tabIndex = -1; heading.focus(); routeAnnouncement = heading.textContent?.trim() || ''; }
-    window.scrollTo(0, 0);
+    await focusAndAnnounceRoute();
   }
 
   function navigate(event: MouseEvent, next: string, exitsDemo = false) {
@@ -357,9 +398,9 @@
   </a>
   <nav aria-label="Primary navigation">
     {#if path === '/'}
-    <a href="/demo" onclick={(event) => navigate(event, '/demo')}>Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
+    <a href="/?demo=1" onclick={(event) => navigate(event, '/?demo=1')}>Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
     {:else if path === '/demo'}<a href="/" onclick={(event) => navigate(event, '/', true)}>Start for real</a><a href="/privacy">Privacy</a>
-    {:else}<a href="/">Home</a><a href="/demo">Demo</a><a href="#main" aria-current="page">{path === '/privacy' ? 'Privacy' : 'Terms'}</a>{/if}
+    {:else}<a href="/">Home</a><a href="/?demo=1">Demo</a><a href="#main" aria-current="page">{path === '/privacy' ? 'Privacy' : 'Terms'}</a>{/if}
   </nav>
   <span class:offline={!online} class="network"><i></i>{online ? 'Browser online' : 'Browser offline'}</span>
 </header>
@@ -377,10 +418,10 @@
 {#if path === '/privacy'}
   <article class="legal">
     <p class="eyebrow">Privacy notice</p><h1>How this relay handles data</h1>
-    <p class="lede">The self-hosted core is designed to transform incident data without retaining raw alert bodies or raw fetched logs.</p>
-    <h2>What the relay stores</h2><p>SQLite stores channel settings, short-lived demo session IDs, and a 20-entry delivery ledger. Demo session rows contain only an ID and expiry time. The relay does not store raw alerts, evidence, or license tokens.</p>
-    <h2>Where secrets live</h2><p>Upstream and destination bearer tokens, admin access, and the signing key come from environment variables. Destination and source URLs may be stored in the local SQLite configuration. Browser license tokens and paid policy presets remain in your browser’s local storage.</p>
-    <h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification contacts Sociobot when a license is present, at most once per day. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
+    <p class="lede">The self-hosted core transforms incident data without retaining raw alert bodies or fetched logs.</p>
+    <h2>What the relay stores</h2><p>SQLite stores route settings, short-lived demo session IDs, and the latest 20 delivery records. Demo session rows contain only an ID and expiry time. The relay does not store raw alerts, evidence, or license tokens.</p>
+    <h2>Where secrets live</h2><p>The relay reads configured secrets from its environment or protected files on the server. Destination and source URLs may be stored in SQLite. License tokens and paid presets are stored in your browser.</p>
+    <h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification sends the stored token to Sociobot in an authorization header. The browser waits 24 hours after each attempt. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
     <h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them.</p>
     <p class="updated">Effective 27 August 2026</p>
   </article>
@@ -401,9 +442,9 @@
       <p class="eyebrow">Add evidence to webhook alerts</p>
       <h1 id="hero-title">Add redacted evidence to webhook alerts</h1>
       <p class="lede">For on-call engineers and webhook consumers who need incident context without another dashboard login.</p>
-      <div class="hero-actions"><a class="button primary" href="/demo">Try it with sample data</a><a class="button secondary" href="#configure">Configure your route</a></div>
+      <div class="hero-actions"><a class="button primary" href="/?demo=1" onclick={(event) => navigate(event, '/?demo=1')}>Try it with sample data</a><a class="button secondary" href="#configure">Configure your route</a></div>
       <p class="action-note">The sample opens a signed, redacted envelope in an isolated workspace.</p>
-      <ul class="trust-list" aria-label="Product facts"><li>Demo data is never added to route history</li><li>No analytics or third-party scripts</li><li>Self-hosted core is free; Field Kit costs $39 once</li></ul>
+      <ul class="trust-list" aria-label="Product facts"><li>Demo data is never added to route history</li><li>No analytics or third-party scripts</li><li>The self-hosted core is free. Field Kit costs $39 once.</li></ul>
     </div>
     <figure class="terrain">
       <picture><source media="(max-width: 700px)" srcset="/assets/evidence-terrain-960.webp" /><img src="/assets/evidence-terrain-1536.webp" width="1536" height="1024" decoding="async" fetchpriority="high" alt="An amber alert path crosses a topographic incident map, passes a redaction mark, and arrives at a sealed green envelope." /></picture>

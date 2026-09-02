@@ -27,6 +27,14 @@ body {
   background: #f3f0e5;
   color: #17241f;
 }
+.sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 a {
   color: inherit;
   text-underline-offset: 4px;

@@ -21,14 +21,15 @@
   <title>Privacy — Alert Evidence Envelope</title>
 </head>
 <body>
+<p class="sr-status" aria-live="polite" aria-atomic="true" data-route-announcer></p>
 <a class="skip-link" href="#main">Skip to main content</a>
-<header class="site-header"><a class="brand" href="/">Alert Evidence<br /><em>Envelope</em></a><nav aria-label="Primary navigation"><a href="/">Home</a><a href="/demo">Demo</a><a href="/privacy" aria-current="page">Privacy</a><a href="/terms">Terms</a></nav></header>
+<header class="site-header"><a class="brand" href="/">Alert Evidence<br /><em>Envelope</em></a><nav aria-label="Primary navigation"><a href="/">Home</a><a href="/?demo=1">Demo</a><a href="/privacy" aria-current="page">Privacy</a><a href="/terms">Terms</a></nav></header>
 <main id="main"><article class="legal">
   <p class="eyebrow">Privacy notice</p>
-  <h1>How this relay handles data</h1>
+  <h1 tabindex="-1">How this relay handles data</h1>
   <p class="lede">The self-hosted core transforms incident data without retaining raw alert bodies or fetched logs.</p>
   <h2>What the relay stores</h2>
-  <p>SQLite stores channel settings and the latest 20 delivery records.</p>
+  <p>SQLite stores route settings and the latest 20 delivery records.</p>
   <p>Each record contains an envelope ID, service, state, query fingerprint, time, item count, and byte count.</p>
   <p>The relay does not store inbound bodies, evidence excerpts, bearer tokens, or license tokens.</p>
   <h2>Where secrets live</h2>

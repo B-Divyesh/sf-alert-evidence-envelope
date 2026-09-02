@@ -1,5 +1,5 @@
-const CACHE = 'envelope-shell-v5';
-const SHELL = ['/', '/demo', '/privacy', '/terms', '/404.html', '/legal.css', '/build.js', '/favicon.svg', '/apple-touch-icon.png', '/fonts/inter-latin.woff2', '/fonts/fraunces-latin.woff2', '/assets/evidence-terrain-960.webp'];
+const CACHE = 'envelope-shell-v6';
+const SHELL = ['/', '/?demo=1', '/demo', '/privacy', '/terms', '/404.html', '/legal.css', '/build.js', '/favicon.svg', '/apple-touch-icon.png', '/fonts/inter-latin.woff2', '/fonts/fraunces-latin.woff2', '/assets/evidence-terrain-960.webp'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then(async (cache) => {

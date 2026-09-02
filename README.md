@@ -4,7 +4,7 @@ Add bounded, redacted, signed evidence to webhook alerts.
 
 For on-call engineers and webhook consumers. It builds an evidence envelope from alert JSON, then delivers it to a configured destination.
 
-[Try it with sample data](https://alert-evidence-envelope.sociobot.in/demo). The isolated sample shows a checkout timeout with redacted values.
+[Try it with sample data](https://alert-evidence-envelope.sociobot.in/?demo=1). The isolated sample shows a checkout timeout with redacted values.
 
 ## What it does
 
@@ -12,7 +12,7 @@ For on-call engineers and webhook consumers. It builds an evidence envelope from
 - Removes configured sensitive fields, including nested fields.
 - Records a fingerprint from the fixed source and alert query.
 - Signs the envelope with HMAC-SHA256.
-- Sends a JSON webhook the signed envelope and signature header.
+- Sends the signed envelope and signature header to a JSON webhook.
 - Sends Slack the envelope plus a readable `text` field.
 - Sends an email gateway webhook `subject`, `text`, and `envelope` fields.
 - Keeps separate delivery routes with their own inbound URLs, destinations, and redaction lists.

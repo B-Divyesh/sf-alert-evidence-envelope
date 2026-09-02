@@ -10,13 +10,13 @@ const seriousAxe = async (page: Page) => {
   return results.violations.filter((violation) => ['serious', 'critical'].includes(violation.impact || ''));
 };
 
-test('@claim:demo-envelope opens one-click sample and builds a safe envelope', async ({ page }) => {
+test('@claim:demo-envelope opens one-click sample and builds a signed envelope', async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.goto('/');
   await expect(page.locator('h1')).toHaveText('Add redacted evidence to webhook alerts');
   await page.getByRole('link', { name: 'Try it with sample data' }).click();
-  await expect(page).toHaveURL(/\/demo$/);
+  await expect(page).toHaveURL(/\/\?demo=1$/);
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://alert-evidence-envelope.sociobot.in/demo');
   await expect(page.getByText('Demo — sample data, nothing is saved')).toBeVisible();
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
@@ -175,7 +175,7 @@ test('discovers the mobile LCP image before app boot without loading webfonts', 
 test('@claim:offline-demo reloads the sample offline after the first visit', async ({ browser, baseURL }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
-  await page.goto(`${baseURL}/demo`);
+  await page.goto(`${baseURL}/?demo=1`);
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
   await page.evaluate(() => navigator.serviceWorker.ready);
   const offlineRequests: string[] = [];
@@ -202,7 +202,7 @@ test('keeps an updateable offline shell', async ({ page }) => {
   const shell = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
     await registration.update();
-    return (await caches.keys()).includes('envelope-shell-v5');
+    return (await caches.keys()).includes('envelope-shell-v6');
   });
   expect(shell).toBe(true);
 });
@@ -210,13 +210,13 @@ test('keeps an updateable offline shell', async ({ page }) => {
 test('@claim:no-tracking keeps the sample flow on the product origin', async ({ page, baseURL }) => {
   const origins = new Set<string>();
   page.on('request', (request) => origins.add(new URL(request.url()).origin));
-  await page.goto('/demo');
+  await page.goto('/?demo=1');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
   expect([...origins]).toEqual([new URL(baseURL!).origin]);
 });
 
 test('resets and exits the isolated demo without retaining its namespace', async ({ page }) => {
-  await page.goto('/demo');
+  await page.goto('/?demo=1');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
   const firstSession = await page.evaluate(() => localStorage.getItem('demo:alert-evidence-envelope:session'));
   await page.getByText('Inspect signed JSON').click();
@@ -260,16 +260,38 @@ test('serves discovery metadata, icons, and a designed 404', async ({ page, requ
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://alert-evidence-envelope.sociobot.in/404');
   await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://alert-evidence-envelope.sociobot.in/404');
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f3f0e5');
+  await expect(page.getByRole('link', { name: 'Open route builder' })).toHaveAttribute('href', '/#configure');
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Configure' })).toHaveAttribute('href', '/#configure');
+  await expect(page.getByRole('link', { name: 'Source (external)' })).toBeVisible();
 });
 
 test('moves focus and announces the new route after in-app navigation', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('link', { name: 'Demo' }).click();
-  await expect(page).toHaveURL(/\/demo$/);
+  await expect(page).toHaveURL(/\/\?demo=1$/);
   await expect(page.locator('h1')).toBeFocused();
-  await expect(page.locator('[aria-live="polite"]').first()).toContainText('Inspect a sample evidence envelope');
+  await expect(page.locator('[aria-live="polite"]').first()).toHaveText('Demo — Alert Evidence Envelope');
   await page.goBack();
   await expect(page.locator('h1')).toBeFocused();
+  await expect(page.locator('[aria-live="polite"]').first()).toHaveText('Alert Evidence Envelope — add evidence to alerts');
+});
+
+test('moves focus and announces static legal routes and browser Back', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('link', { name: 'Privacy' }).click();
+  await expect(page).toHaveURL(/\/privacy$/);
+  await expect(page.locator('h1')).toBeFocused();
+  await expect(page.locator('[data-route-announcer]')).toHaveText('Privacy — Alert Evidence Envelope');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator('h1')).toBeFocused();
+  await expect(page.locator('[aria-live="polite"]').first()).toHaveText('Alert Evidence Envelope — add evidence to alerts');
+
+  await page.locator('.footer-links').getByRole('link', { name: 'Terms' }).click();
+  await expect(page).toHaveURL(/\/terms$/);
+  await expect(page.locator('h1')).toBeFocused();
+  await expect(page.locator('[data-route-announcer]')).toHaveText('Terms — Alert Evidence Envelope');
 });
 
 test('keeps every 390px interactive target at least 44 by 44px', async ({ page }) => {
@@ -299,7 +321,7 @@ test('@claim:field-kit-purchase shows the price and official checkout action', a
   const checkout = page.getByRole('link', { name: 'Buy the Field Kit' });
   const productionUrl = 'https://api.sociobot.in/api/v1/products/alert-evidence-envelope/checkout';
   await expect(checkout).toHaveAttribute('href', productionUrl);
-  await expect(page.getByText('Self-hosted core is free; Field Kit costs $39 once', { exact: true })).toBeVisible();
+  await expect(page.getByText('The self-hosted core is free. Field Kit costs $39 once.', { exact: true })).toBeVisible();
   expect(new URL(await checkout.getAttribute('href') || '').origin).toBe('https://api.sociobot.in');
 });
 
@@ -344,7 +366,7 @@ test('restores a Field Kit license and strips returned tokens from the URL', asy
 
 test('@claim:mobile-demo-result shows the complete transformed envelope above the fold', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/demo');
+  await page.goto('/?demo=1');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
   for (const text of ['checkout-api', 'payment authorization timed out', '[REDACTED]', 'Envelope signed. Demo data was not stored.']) {
     const box = await page.getByText(text, { exact: text === 'checkout-api' || text === 'payment authorization timed out' }).first().boundingBox();
@@ -359,7 +381,7 @@ test('@claim:demo-route-policies compares isolated sample policies without prote
   page.on('request', (request) => {
     if (/\/api\/v1\/(?:config|channels|history|preview|relay)/.test(new URL(request.url()).pathname)) protectedRequests.push(request.url());
   });
-  await page.goto('/demo');
+  await page.goto('/?demo=1');
   await expect(page.getByText('Customer automation removes email, token before delivery.')).toBeVisible();
   await page.getByText('Inspect signed JSON').click();
   await expect(page.getByLabel('Signed evidence envelope JSON')).toContainText('"email": "[REDACTED]"');

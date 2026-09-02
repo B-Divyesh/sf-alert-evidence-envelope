@@ -22,20 +22,21 @@
   <link rel="stylesheet" href="/legal.css" />
 </head>
 <body>
+  <p class="sr-status" aria-live="polite" aria-atomic="true" data-route-announcer></p>
   <a class="skip-link" href="#main">Skip to main content</a>
   <header class="site-header">
     <a class="brand" href="/" aria-label="Alert Evidence Envelope home">Alert Evidence<br /><em>Envelope</em></a>
-    <nav aria-label="Primary navigation"><a href="/demo">Demo</a><a href="/">Configure</a><a href="/privacy">Privacy</a></nav>
+    <nav aria-label="Primary navigation"><a href="/?demo=1">Demo</a><a href="/#configure">Configure</a><a href="/privacy">Privacy</a></nav>
   </header>
   <main id="main">
     <article class="legal not-found">
       <p class="eyebrow">Page not found</p>
-      <h1>We could not find this page</h1>
+      <h1 tabindex="-1">We could not find this page</h1>
       <p class="lede">The address may be outdated. Open the route builder or try the sample.</p>
-      <p class="not-found-actions"><a class="legal-button" href="/">Open route builder</a><a href="/demo">Try sample data</a></p>
+      <p class="not-found-actions"><a class="legal-button" href="/#configure">Open route builder</a><a href="/?demo=1">Try sample data</a></p>
     </article>
   </main>
-  <footer><p>Send bounded incident evidence with webhook alerts · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="https://github.com/B-Divyesh/sf-alert-evidence-envelope">Source</a> · Built by Param Factory · <span data-build>Build unavailable</span></p></footer>
+  <footer><p>Send bounded incident evidence with webhook alerts · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="https://github.com/B-Divyesh/sf-alert-evidence-envelope">Source (external)</a> · Built by Param Factory · <span data-build>Build unavailable</span></p></footer>
   <script src="/build.js" defer></script>
 </body>
 </html>
