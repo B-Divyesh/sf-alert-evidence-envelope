@@ -18,6 +18,7 @@ Headings use self-hosted **Fraunces**, whose slightly irregular serif forms evok
 - A persistent status strip reports whether the relay is ready, waiting, or degraded. Success never relies on a transient toast alone.
 - Configuration is a linear field checklist. Advanced upstream settings disclose in place. A generated hero illustration clarifies the transformation but contains no simulated UI or capability claims.
 - On phones the illustration and secondary explanatory labels drop below the primary setup action; pipeline stages stack vertically; data tables become labelled blocks.
+- On the 390 px demo, the completed envelope is the first work surface. Its service, error, first-seen time, bounds, and fingerprint use a compact survey readout before the editable alert.
 
 ## Motion
 

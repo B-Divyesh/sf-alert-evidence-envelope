@@ -56,8 +56,7 @@ No sentence exceeds 22 words. No entry uses a banned marketing term. The first s
 | Demo — sample data, nothing is saved | 7 |
 | Isolated workspace expires after 24 hours. | 6 |
 | Inspect a sample evidence envelope | 5 |
-| The sample runs automatically in an isolated workspace. | 8 |
-| It never changes the protected route. | 6 |
+| The sample runs in an isolated workspace without changing protected routes. | 11 |
 | Internal Slack removes token before delivery. | 6 |
 | Customer automation removes email, token before delivery. | 7 |
 | Sensitive fields [REDACTED] | 3 |
@@ -147,3 +146,9 @@ No sentence exceeds 22 words. No entry uses a banned marketing term. The first s
 | Copy | Words |
 | --- | ---: |
 | Sends the signed envelope and signature header to a JSON webhook. | 11 |
+
+## Catalog description
+
+| Copy | Words |
+| --- | ---: |
+| Add bounded, redacted, signed evidence to webhook alerts without storing raw incident data. | 13 |
