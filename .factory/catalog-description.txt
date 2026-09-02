@@ -1,1 +1,1 @@
-Add bounded, redacted evidence to webhook alerts, then sign it for on-call responders.
+Add bounded, redacted, signed evidence to webhook alerts without storing raw incident data.

@@ -427,7 +427,7 @@
   </aside>
 {/if}
 
-<main id="main">
+<main id="main" class:demo-page={path === '/demo'}>
 {#if path === '/privacy'}
   <article class="legal">
     <p class="eyebrow">Privacy notice</p><h1>How this relay handles data</h1>
@@ -501,23 +501,27 @@
 {/if}
 
   <section id="test" class="test-bench" aria-labelledby="test-title">
-    <div class="section-heading"><p class="eyebrow">Envelope preview</p>{#if path === '/demo'}<h1 id="test-title">Inspect a sample evidence envelope</h1><p>The sample runs automatically in an isolated workspace. It never changes the protected route.</p>{:else}<h2 id="test-title">Inspect an envelope before delivery</h2><p>Preview applies the live route’s bounds, redaction, fingerprint, and signature. It does not add delivery history.</p>{/if}</div>
+    <div class="section-heading"><p class="eyebrow">Envelope preview</p>{#if path === '/demo'}<h1 id="test-title">Inspect a sample evidence envelope</h1><p>The sample runs in an isolated workspace without changing protected routes.</p>{:else}<h2 id="test-title">Inspect an envelope before delivery</h2><p>Preview applies the live route’s bounds, redaction, fingerprint, and signature. It does not add delivery history.</p>{/if}</div>
     <div class="bench-grid">
       <div>{#if path === '/demo'}<div class="demo-routes" aria-label="Sample routes">{#each demoRoutes as route}<button type="button" class:active={demoRoute.id === route.id} onclick={() => selectDemoRoute(route.id)}><b>{route.name}</b><span>{route.destination} · removes {route.fields.join(' and ')}</span></button>{/each}</div>{/if}<label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build signed preview'}</button></div>
-      <div class="envelope-output" class:demo-output={path === '/demo'} aria-busy={previewState === 'loading'}>
+      <div class="envelope-output" class:demo-output={path === '/demo'} data-demo-result={path === '/demo' && previewState === 'success' ? 'complete' : undefined} aria-busy={previewState === 'loading'}>
         {#if previewState === 'idle'}<div class="empty"><svg aria-hidden="true" viewBox="0 0 64 64"><path d="M9 18h46v32H9zM10 20l22 17 22-17"/><path d="M24 12c5-5 11-5 16 0"/></svg><h3>No envelope yet</h3><p>Use the sample as-is or paste a realistic alert with sensitive values removed.</p></div>
         {:else if previewState === 'loading'}<div class="empty"><div class="loader" aria-hidden="true"></div><h3>Building the envelope</h3><p>Bounding → redacting → fingerprinting → signing</p></div>
         {:else if previewState === 'error'}<div class="empty error-panel"><b>Preview stopped</b><p>{previewMessage}</p><button type="button" onclick={() => sample = sampleAlert}>Restore valid sample</button></div>
         {:else}
-          <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
-          {#if path === '/demo'}<p class="demo-sealed" aria-live="polite">{previewMessage}</p>{/if}
-          <p class="redaction-result"><b>Sensitive fields</b> [REDACTED]</p>
-          {#if path === '/demo'}<p class="demo-route-result"><b>{demoRoute.name}</b> removes {preview.redacted_fields.join(', ')} before delivery.</p>{/if}
-          <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
-          <div class="coordinates"><span><b>{preview.evidence_items}</b> items</span><span><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
-          <p class="fingerprint"><span>Query fingerprint</span><code>{preview.query_fingerprint}</code></p>
-          <details><summary>Inspect signed JSON</summary><!-- svelte-ignore a11y_no_noninteractive_tabindex (the bounded scroll region must accept keyboard focus) --><pre tabindex="0" aria-label="Signed evidence envelope JSON">{JSON.stringify(preview, null, 2)}</pre></details>
-          <button class="copy" type="button" onclick={() => copy(JSON.stringify(preview, null, 2), 'Signed envelope copied')}>Copy envelope JSON</button>
+          <div class="result-summary" data-result-summary>
+            <div class="envelope-head"><span>SEALED</span><code>{preview.schema}</code></div>
+            {#if path === '/demo'}<p class="demo-sealed" aria-live="polite">{previewMessage}</p>{/if}
+            <p class="redaction-result"><b>Sensitive fields</b> [REDACTED]</p>
+            {#if path === '/demo'}<p class="demo-route-result"><b>{demoRoute.name}</b> removes {preview.redacted_fields.join(', ')} before delivery.</p>{/if}
+            <dl class="summary"><div><dt>Service</dt><dd>{preview.summary.service}</dd></div><div><dt>Error signature</dt><dd>{preview.summary.error_signature}</dd></div><div data-result-field="first-seen"><dt>First seen</dt><dd>{formatDate(preview.summary.first_seen)}</dd></div></dl>
+            <div class="coordinates"><span data-result-field="items"><b>{preview.evidence_items}</b> items</span><span data-result-field="bytes"><b>{formatBytes(preview.evidence_bytes)}</b> evidence</span><span data-result-field="truncation"><b>{preview.truncated ? 'Yes' : 'No'}</b> truncated</span></div>
+            <p class="fingerprint" data-result-field="fingerprint"><span>Query fingerprint</span><code>{preview.query_fingerprint}</code></p>
+          </div>
+          <div class="output-actions">
+            <details><summary>Inspect signed JSON</summary><!-- svelte-ignore a11y_no_noninteractive_tabindex (the bounded scroll region must accept keyboard focus) --><pre tabindex="0" aria-label="Signed evidence envelope JSON">{JSON.stringify(preview, null, 2)}</pre></details>
+            <button class="copy" type="button" onclick={() => copy(JSON.stringify(preview, null, 2), 'Signed envelope copied')}>Copy envelope JSON</button>
+          </div>
           <p class="copy-feedback" aria-live="polite">{copyMessage}</p>
         {/if}
         {#if !(path === '/demo' && previewState === 'success')}<p class:bad={previewState === 'error'} class="bench-status" aria-live="polite">{previewMessage}</p>{/if}

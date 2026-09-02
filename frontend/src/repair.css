@@ -129,9 +129,148 @@ pre:focus-visible {
     text-align: center;
   }
 
-  /* Keep the completed sample envelope inside the 390 × 844 demo viewport. */
-  .test-bench .bench-grid {
-    margin-top: 32px;
+  /* The demo is an evidence instrument on phones: result first, compact
+     controls, and every decision field visible before the first scroll. */
+  .demo-banner {
+    gap: 6px 8px;
+    padding: 7px 12px;
+  }
+
+  .demo-banner span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .demo-banner button,
+  .demo-banner a {
+    min-height: 44px;
+    padding-block: 7px;
+  }
+
+  .demo-page .test-bench {
+    padding: 10px 12px 48px;
+  }
+
+  .demo-page .test-bench .section-heading {
+    margin-bottom: 4px;
+  }
+
+  .demo-page .test-bench .section-heading .eyebrow {
+    margin-bottom: 2px;
+    font-size: 10px;
+  }
+
+  .demo-page .test-bench .section-heading h1 {
+    margin-bottom: 3px;
+    font-size: 27px;
+    line-height: 1;
+  }
+
+  .demo-page .test-bench .section-heading > p:last-child {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.25;
+  }
+
+  .demo-page .test-bench .bench-grid {
+    margin-top: 6px;
+  }
+
+  .demo-page .demo-output {
+    min-height: 0;
+    padding: 8px 10px;
+  }
+
+  .demo-output .envelope-head {
+    padding-bottom: 4px;
+  }
+
+  .demo-output .envelope-head span {
+    padding: 2px 6px;
+  }
+
+  .demo-output .demo-sealed,
+  .demo-output .redaction-result,
+  .demo-output .demo-route-result {
+    margin-block: 4px;
+    line-height: 1.2;
+  }
+
+  .demo-output .redaction-result,
+  .demo-output .demo-route-result {
+    padding: 4px 7px;
+  }
+
+  .demo-output .summary {
+    margin: 4px 0;
+  }
+
+  .demo-output .summary div {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 6px;
+    padding: 2px 0;
+  }
+
+  .demo-output .summary dt,
+  .demo-output .summary dd {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .demo-output .coordinates {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 4px 0;
+  }
+
+  .demo-output .coordinates span {
+    padding: 4px;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .demo-output .coordinates span:last-child {
+    border-right: 0;
+  }
+
+  .demo-output .coordinates b {
+    font-size: 14px;
+  }
+
+  .demo-output .fingerprint {
+    align-items: center;
+    margin: 4px 0;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .demo-output .output-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .demo-output .output-actions details {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .demo-output .output-actions summary,
+  .demo-output .output-actions > .copy {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .demo-output .copy-feedback {
+    min-height: 0;
+    margin: 0;
   }
 }
 

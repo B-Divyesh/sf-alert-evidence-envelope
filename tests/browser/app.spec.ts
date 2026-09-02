@@ -365,13 +365,40 @@ test('restores a Field Kit license and strips returned tokens from the URL', asy
 });
 
 test('@claim:mobile-demo-result shows the complete transformed envelope above the fold', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  test.skip(testInfo.project.name !== 'mobile-chromium', 'This claim measures the mobile project viewport.');
+  expect(page.viewportSize()).toEqual({ width: 390, height: 844 });
   await page.goto('/?demo=1');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
-  for (const text of ['checkout-api', 'payment authorization timed out', '[REDACTED]', 'Envelope signed. Demo data was not stored.']) {
-    const box = await page.getByText(text, { exact: text === 'checkout-api' || text === 'payment authorization timed out' }).first().boundingBox();
-    expect(box, text).not.toBeNull();
-    expect(box!.y + box!.height, text).toBeLessThanOrEqual(844);
+
+  const result = page.locator('[data-demo-result="complete"]');
+  await expect(result).toBeVisible();
+  const resultBox = await result.boundingBox();
+  expect(resultBox, 'complete result geometry').not.toBeNull();
+  expect(resultBox!.x, 'result left edge').toBeGreaterThanOrEqual(0);
+  expect(resultBox!.x + resultBox!.width, 'result right edge').toBeLessThanOrEqual(390);
+  expect(resultBox!.y, 'result top edge').toBeGreaterThanOrEqual(0);
+  expect(resultBox!.y + resultBox!.height, 'result bottom edge').toBeLessThanOrEqual(844);
+  expect(await page.evaluate(() => scrollY), 'the claim starts before scrolling').toBe(0);
+
+  const requiredFields = [
+    { locator: result.getByText('Envelope signed. Demo data was not stored.'), value: /Envelope signed/ },
+    { locator: result.locator('.redaction-result'), value: /\[REDACTED\]/ },
+    { locator: result.getByText('checkout-api', { exact: true }), value: /^checkout-api$/ },
+    { locator: result.getByText('payment authorization timed out', { exact: true }), value: /^payment authorization timed out$/ },
+    { locator: result.locator('[data-result-field="first-seen"]'), value: /First seen.*8\/27\/2026.*2:32:08 PM/s },
+    { locator: result.locator('[data-result-field="items"]'), value: /2\s*items/ },
+    { locator: result.locator('[data-result-field="bytes"]'), value: /213 B\s*evidence/ },
+    { locator: result.locator('[data-result-field="truncation"]'), value: /No\s*truncated/ },
+    { locator: result.locator('[data-result-field="fingerprint"]'), value: /Query fingerprint\s*[0-9a-f]{16}/ },
+  ];
+
+  for (const field of requiredFields) {
+    await expect(field.locator).toBeVisible();
+    await expect(field.locator).toContainText(field.value);
+    const box = await field.locator.boundingBox();
+    expect(box, String(field.value)).not.toBeNull();
+    expect(box!.y, `${field.value} top edge`).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height, `${field.value} bottom edge`).toBeLessThanOrEqual(844);
   }
   await page.screenshot({ path: testInfo.outputPath('mobile-demo-complete-result.png'), fullPage: false });
 });
