@@ -18,7 +18,7 @@ Repair commits: `43f47000fe5ef77ec4e1a9414476314ab575ab82` and `a2234a17b5ac0f7c
 - `cargo fmt --check` — pass.
 - `cargo clippy --all-targets --locked -- -D warnings` — pass.
 - `npm run build` — pass; initial JavaScript gzip is 26.42 KB and CSS gzip is 5.49 KB.
-- Fresh clone `/tmp/aee-clean-OGLsmX` at `43f47000fe5ef77ec4e1a9414476314ab575ab82`: `npm ci`, then every exact command in all 28 `.factory/claims.json` entries — pass.
+- Fresh clone `/tmp/aee-clean-OGLsmX` at `43f47000fe5ef77ec4e1a9414476314ab575ab82`, and the final pushed tree at `/tmp/aee-final-clean-6a4Vtt`: `npm ci`, then every exact command in all 28 `.factory/claims.json` entries — pass.
 - Browser coverage includes keyboard, route focus/back behavior, 390 px layout and touch targets, dark/light axe scans, offline reload, request privacy, legal pages, 404, security headers, and demo isolation.
 
 ## Deploy and live recheck
