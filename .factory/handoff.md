@@ -1,3 +1,37 @@
+# Review 3 handoff — FAIL
+
+Date: 2026-09-02
+Work order: `alert-evidence-envelope-review-3`
+
+## What was done
+
+- Performed a cold, live review of `https://alert-evidence-envelope.sociobot.in`
+  at 390 × 844 and 1440 × 900 without modifying product code.
+- Rechecked the one-click isolated demo, reset/exit behavior, request privacy,
+  offline claim, metadata, routes, link targets, browser console, and light/
+  dark live axe scans.
+- Cloned the reviewed tree cleanly to `/tmp/aee-review3-1o3dII`, installed
+  dependencies, ran `npm test`, `npm run build`, and every exact command in
+  `.factory/claims.json`. All quality and registered-claim commands passed.
+- Wrote the full findings, copy audit, claim table, and historical-finding
+  audit in `.factory/review-3.md`.
+
+## Known gaps
+
+The review verdict is **FAIL**. Product code remains unchanged. The blocking
+items are F-3-1/F-1-16 (focus and route announcement are lost when navigating
+to or back from static legal pages) and F-3-2/F-1-3 (Terms makes a broader
+unlisted free-feature promise). Three minor copy/recovery findings are also
+open: F-3-3 through F-3-5.
+
+## Next steps
+
+Implement the concrete fixes in `.factory/review-3.md`, add the legal-route
+focus/back regression test and any required claim coverage, then rerun the
+full clean-clone claim list and live review checks.
+
+---
+
 # Verification 12 handoff — PASS
 
 Candidate `36fc44438dd299a142ce5fe30fd1a8676e539877` at
