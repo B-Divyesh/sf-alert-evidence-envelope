@@ -301,7 +301,13 @@
     await fetch(`/api/v1/demo/sessions/${session}`, { method: 'DELETE' }).catch(() => undefined);
   }
 
-  async function runDemoPreview(session: string, route: typeof demoRoutes[number], generation: number, signal: AbortSignal) {
+  async function runDemoPreview(
+    session: string,
+    route: typeof demoRoutes[number],
+    sampleInput: string,
+    generation: number,
+    signal: AbortSignal,
+  ) {
     if (!currentDemoOperation(generation)) return;
     if (!navigator.onLine) {
       online = false;
@@ -313,7 +319,7 @@
     }
     previewState = 'loading'; previewMessage = 'Bounding and redacting evidence…'; preview = null;
     try {
-      const alert = JSON.parse(sampleAlert);
+      const alert = JSON.parse(sampleInput);
       const result = await demoApi(`/api/v1/demo/sessions/${session}/preview`, {
         method: 'POST', signal, body: JSON.stringify({
           alert, redact_fields: route.fields, max_items: config.max_items, max_bytes: config.max_bytes,
@@ -335,8 +341,11 @@
     if (path === '/demo') {
       const generation = demoGeneration;
       const controller = demoAbortController;
-      if (!demoSession || !controller || !currentDemoOperation(generation)) return;
-      await runDemoPreview(demoSession, demoRoute, generation, controller.signal);
+      const session = demoSession;
+      const route = demoRoute;
+      const sampleInput = sample;
+      if (!session || !controller || !currentDemoOperation(generation)) return;
+      await runDemoPreview(session, route, sampleInput, generation, controller.signal);
       return;
     }
     if (!navigator.onLine) {
@@ -395,7 +404,8 @@
           if (!currentDemoOperation(generation)) return;
         }
         localStorage.removeItem(demoPreviewKey);
-        sample = sampleAlert;
+        const sampleInput = sampleAlert;
+        sample = sampleInput;
         preview = null;
         previewState = 'loading';
         previewMessage = 'Starting an isolated sample workspace…';
@@ -406,7 +416,7 @@
         }
         demoSession = response.id;
         localStorage.setItem(demoSessionKey, demoSession);
-        await runDemoPreview(demoSession, demoRoute, generation, controller.signal);
+        await runDemoPreview(demoSession, demoRoute, sampleInput, generation, controller.signal);
       } catch (error) {
         if (!currentDemoOperation(generation) || wasCancelled(error)) return;
         previewState = 'error';

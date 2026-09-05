@@ -37,6 +37,48 @@ test('@claim:demo-envelope opens one-click sample and builds a signed envelope',
   expect(consoleErrors).toEqual([]);
 });
 
+test('@claim:editable-demo builds from edited JSON, rejects invalid JSON, and recovers', async ({ page }) => {
+  const previewAlerts: Array<Record<string, unknown>> = [];
+  page.on('request', (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && /^\/api\/v1\/demo\/sessions\/[^/]+\/preview$/.test(pathname)) {
+      previewAlerts.push(request.postDataJSON().alert);
+    }
+  });
+
+  await page.goto('/?demo=1');
+  await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
+  const editor = page.getByLabel('Sample alert JSON');
+  const editedInput = (await editor.inputValue())
+    .replaceAll('checkout-api', 'edited-demo-service')
+    .replace('payment authorization timed out', 'edited timeout signature');
+  await editor.fill(editedInput);
+  await page.getByRole('button', { name: 'Build signed preview' }).click();
+
+  await expect(page.getByText('edited-demo-service', { exact: true })).toBeVisible();
+  await expect(page.getByText('edited timeout signature', { exact: true })).toBeVisible();
+  expect(previewAlerts.at(-1)).toMatchObject({
+    service: 'edited-demo-service',
+    error: 'edited timeout signature',
+  });
+
+  const requestsBeforeInvalidInput = previewAlerts.length;
+  await editor.fill('{');
+  await page.getByRole('button', { name: 'Build signed preview' }).click();
+  const errorPanel = page.locator('.error-panel');
+  await expect(errorPanel.getByText('Preview stopped')).toBeVisible();
+  await expect(errorPanel.getByText('Sample alert is not valid JSON. Check commas and quotes.')).toBeVisible();
+  expect(previewAlerts).toHaveLength(requestsBeforeInvalidInput);
+
+  await page.getByRole('button', { name: 'Restore valid sample' }).click();
+  await expect(editor).toHaveValue(/"service": "checkout-api"/);
+  await page.getByRole('button', { name: 'Build signed preview' }).click();
+  await expect(page.getByText('checkout-api', { exact: true })).toBeVisible();
+  await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
+  expect(previewAlerts).toHaveLength(requestsBeforeInvalidInput + 1);
+  expect(previewAlerts.at(-1)).toMatchObject({ service: 'checkout-api' });
+});
+
 test('keeps expanded JSON keyboard-scrollable and accessible in both themes', async ({ page }) => {
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
