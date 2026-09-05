@@ -1,3 +1,48 @@
+# Strict review 6 handoff — FAIL
+
+Date: 2026-09-05
+
+Implementation `9c741c506d374e71578605ed43593d76f0ab5620` has one
+high-severity demo correctness finding. Live build
+`2f47a5aa2464715e8309921d29fc153f1f8755cd` differs from the implementation
+only by the earlier handoff document; review baseline `85dfa02` adds reports
+only.
+
+The default one-click sample, reset/exit isolation, offline reload, backend,
+single-replica `/data` topology, accessibility, rate limiting, performance,
+and all 29 declared claim commands pass. However, the editable **Sample alert
+JSON** field in the demo is ignored. `runDemoPreview()` parses the constant
+`sampleAlert`; a valid service edit still sends and displays `checkout-api`,
+while invalid `{` still returns a successful envelope. This public behavior is
+not listed or tested, so the review verdict is **FAIL** with one finding and
+one untested public claim.
+
+No product code or infrastructure was changed. Required repair: pass a
+captured current sample value into the sandboxed demo operation, retain the
+generation/session/abort guards, and add claim coverage for valid edits,
+invalid JSON, recovery, and the existing reset/exit race. See
+`.factory/review-6.md`.
+
+Verification performed from a detached clean clone:
+
+```sh
+npm ci
+# every exact command in .factory/claims.json
+npm test
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+npm run build
+BUILD_SHA=9c741c506d374e71578605ed43593d76f0ab5620 cargo build --release --locked
+```
+
+`npm test` completed successfully after one Chromium process-start crash
+passed its configured retry; the affected accessibility test then passed 3/3
+independent reruns. Live mobile Lighthouse scored 96 performance and 100 for
+accessibility, best practices, and SEO, with 1.76 s LCP and zero CLS. The
+documented URL verifier passed in 665 ms with no console errors.
+
+## Previous handoff
+
 # Verification 16 handoff — PASS
 
 Date: 2026-09-05
