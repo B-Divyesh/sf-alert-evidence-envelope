@@ -1,4 +1,38 @@
-# Repair 11 handoff — PASS
+# Verification 16 handoff — PASS
+
+Date: 2026-09-05
+
+Independent QA of implementation `9c741c506d374e71578605ed43593d76f0ab5620`
+is **PASS** with zero findings and zero untested claims. The live runtime reports
+the report-only documentation SHA `2f47a5aa2464715e8309921d29fc153f1f8755cd`;
+the diff is only this handoff, and live topology reports revision
+`sf-alert-evidence-envelope--0000039` with one replica and `/data` mounted.
+
+From a clean clone, `npm ci`, all 29 exact declared claim commands, `npm test`,
+formatting, strict Clippy, frontend build, and Rust release build passed. Fresh
+desktop and 390 × 844 phone checks confirmed the plain first screen, one-click
+sample, complete bounded/redacted/signed output, persistent demo label, reset,
+exit cleanup, isolation, offline reload, accessibility, legal/404 routes,
+links, headers, and live rate limiting. The reset/exit race passed live with
+and without an admin token: no protected call, no demo authorization, and no
+remaining `demo:` key.
+
+Run locally:
+
+```sh
+npm ci
+npm test
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+npm run build
+cargo build --release --locked
+npm run verify:live-topology
+```
+
+No known product gaps. See `.factory/verification-16.md` for evidence and the
+full prior-finding disposition.
+
+## Prior repair handoff
 
 Date: 2026-09-05
 
