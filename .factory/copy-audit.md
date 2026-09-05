@@ -1,6 +1,6 @@
 # Copy audit
 
-Audited 2 September 2026 from rendered `/`, `/?demo=1`, `/privacy`, `/terms`, and the 404 at 390 px and 1440 px. Counts treat prices, paths, hyphenated terms, and code tokens as one word. Sample JSON is editable data, not product copy.
+Audited 5 September 2026 from rendered `/`, `/?demo=1`, `/privacy`, `/terms`, and the 404 at 390 px and 1440 px. Counts treat prices, paths, hyphenated terms, and code tokens as one word. Sample JSON is editable data, not product copy.
 
 No sentence exceeds 22 words. No entry uses a banned marketing term. The first screen states the job, audience, action, next result, and three facts.
 
