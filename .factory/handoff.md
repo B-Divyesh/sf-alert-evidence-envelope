@@ -1,34 +1,84 @@
-# Review 5 handoff — FAIL
+# Repair 11 handoff — PASS
 
-Date: 2026-09-02
+Date: 2026-09-05
 
-Work order: `alert-evidence-envelope-review-5`
+Implementation deployed: `9c741c506d374e71578605ed43593d76f0ab5620`
+Live revision: `sf-alert-evidence-envelope--0000038`
+Live image: `sociobotregistry.azurecr.io/sf-alert-evidence-envelope:9c741c506d37`
 
-## Outcome
+## What changed
 
-Reviewed live build `34c18ffe0d3d779a07baf2620969cd89636a7a60` and repository
-commit `15b487808b03ccddb62b1ef6992658159cc3d7ac`. No product code or cloud
-resource was changed.
+Rapid **Reset demo** then **Start for real** could previously let an unfinished
+demo start choose `/api/v1/preview` after the page had moved to the real route.
+The demo now captures an operation generation, session, route, and abort signal
+before asynchronous work. Demo preview requests always use the demo session
+endpoint and never attach the loaded admin token. Leaving demo mode cancels and
+waits for pending demo work, clears every `demo:` key, and removes any created
+demo session before navigating. Reset and exit controls are disabled while a
+reset is in progress.
 
-The review is **FAIL** with one blocking finding: rapid **Reset demo** then
-**Start for real** allows an unfinished demo task to call protected
-`/api/v1/preview`. See `.factory/review-5.md` (`F-5-1`) for reproduction,
-code path, and required regression test.
+The claim inventory now separates browser isolation from server expiry:
 
-## Verified
+- `isolated-demo` is a browser outcome test. It delays the reset delete, forces
+  the queued exit event, runs with and without a loaded admin token, and observes
+  no protected request, no demo authorization header, and no remaining demo key.
+- `demo-expiry` keeps the server-side temporary SQLite test for 24-hour expiry
+  and route-history isolation.
 
-- Fresh 390 × 844 and desktop first screens are clear, with the one-click
-  sample action visible.
-- Normal demo behavior works: complete result above fold, normal reset makes a
-  new session, normal exit clears demo keys, and normal demo traffic stays on
-  the product origin.
-- Clean clone `/tmp/aee-review5-1dF5G6`: `npm ci`, all 28 exact claim commands,
-  `cargo test --locked`, full Playwright suite, and `npm run build` passed.
-- Live light/dark Axe scans found no serious or critical issues. Route,
-  metadata, link, privacy, and prior-finding checks passed.
+The Privacy page and README now say that demo workspaces expire after 24 hours.
 
-## Next step
+## Earlier review history
 
-Cancel or serialize pending demo work on reset/exit, then add the rapid
-reset-and-exit isolation test described in F-5-1. Re-run the complete review
-checklist after the repair.
+The full review and verification history (`review-1` through `review-5`,
+`verification-1` through `verification-15`, and `polish-1` through `polish-4`)
+was checked before this repair. The earlier mobile result, license transport,
+claim coverage, navigation/focus, 404, wording, route-policy, legal chrome,
+destination-contract, and mobile-layout findings remain closed as recorded in
+the latest verification evidence. Review 5 finding `F-5-1` is closed by this
+repair and its new regression coverage. No earlier minor finding was reopened.
+
+## Verification
+
+- Fresh clone `/tmp/aee-repair11-clean-sPBLwn` at implementation SHA:
+  `npm ci`, then all **29** exact commands in `.factory/claims.json` passed.
+  Log: `/tmp/aee-repair11-claim-commands.log`.
+- Repository suite: `npm test` passed — Svelte check had zero diagnostics, all
+  25 Rust tests passed, deployment policy and claims manifest passed, and all
+  62 Playwright cases passed. `test-results/.last-run.json` records `passed`.
+- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`,
+  `npm run build`, and `cargo build --release --locked` passed. Final frontend
+  build is 74.12 KB JavaScript (27.20 KB gzip) and 22.31 KB CSS (5.84 KB gzip).
+- `npm run verify:live-topology` passed. The product runs in single revision
+  mode with one healthy replica and `alert-evidence-envelope-data` mounted at
+  `/data`; it made 20 fresh live demo previews.
+- Fresh live desktop (1440 × 900) and phone (390 × 844) contexts first showed:
+  **Add redacted evidence to webhook alerts**; the on-call/webhook-consumer
+  audience; and **Try it with sample data**. In both contexts the sample showed
+  the persistent demo label, `checkout-api`, the timeout, and first-seen time;
+  normal reset made a new session; exit left no `demo:` key and requested no
+  protected route endpoint.
+- Live Axe scans on `/`, `/demo`, `/privacy`, `/terms`, and the intentional
+  `/not-a-real-route` 404 found zero serious or critical violations. The worker
+  URL audit found one title, `lang=en`, one main landmark, complete image alt
+  text, labelled buttons, and no browser errors (694 ms load).
+- Live limiter check with a fresh forwarded address returned 43 × 401 and
+  57 × 429; every 429 had `Retry-After: 1`.
+
+## Run and deploy
+
+```sh
+npm ci
+npm test
+npm run build
+npm run deploy
+npm run verify:live-topology
+```
+
+The container needs only `PORT`; it generates or persists required server
+credentials and SQLite state under `/data` when the durable mount is present.
+
+## Known gaps
+
+No product defects are known. Docker, Podman, and Buildah were not available
+in this worker, so a local container image was not assembled. The direct Rust
+release build and deployed ACR image/topology were verified instead.
