@@ -71,6 +71,7 @@ No sentence exceeds 22 words. No entry uses a banned marketing term. The first s
 | --- | ---: |
 | The self-hosted core transforms incident data without retaining raw alert bodies or fetched logs. | 13 |
 | SQLite stores route settings and the latest 20 delivery records. | 10 |
+| Demo workspaces expire after 24 hours. | 6 |
 | Each record contains an envelope ID, service, state, query fingerprint, time, item count, and byte count. | 16 |
 | The relay does not store inbound bodies, evidence excerpts, bearer tokens, or license tokens. | 14 |
 | The relay reads configured secrets from its environment or protected files on the server. | 14 |

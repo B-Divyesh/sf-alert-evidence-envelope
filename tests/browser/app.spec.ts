@@ -215,6 +215,47 @@ test('@claim:no-tracking keeps the sample flow on the product origin', async ({ 
   expect([...origins]).toEqual([new URL(baseURL!).origin]);
 });
 
+test('@claim:isolated-demo prevents a reset-and-exit race from reaching real APIs', async ({ page }) => {
+  for (const adminToken of ['', 'test-admin-token-with-at-least-32-characters']) {
+    const protectedRequests: string[] = [];
+    const demoAuthorizations: string[] = [];
+    let releaseDelete: (() => void) | undefined;
+    let delayedDelete = false;
+    page.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (/^\/api\/v1\/(?:config|channels|history|preview|relay)(?:\/|$)/.test(pathname)) protectedRequests.push(request.url());
+      if (pathname.startsWith('/api/v1/demo/')) demoAuthorizations.push(request.headers().authorization || '');
+    });
+
+    await page.goto('/');
+    if (adminToken) await page.getByLabel('Admin token read from the relay host').fill(adminToken);
+    await page.getByRole('link', { name: 'Demo' }).click();
+    await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
+
+    await page.route('**/api/v1/demo/sessions/*', async (route) => {
+      if (route.request().method() !== 'DELETE' || delayedDelete) return route.continue();
+      delayedDelete = true;
+      await new Promise<void>((resolve) => { releaseDelete = resolve; });
+      await route.continue();
+    });
+    await page.getByRole('button', { name: 'Reset demo' }).click();
+    const startForReal = page.getByRole('button', { name: 'Start for real' }).first();
+    await expect(startForReal).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Reset demo' })).toBeDisabled();
+
+    // A disabled control blocks ordinary use. Dispatching the event also proves
+    // stale async work remains sandboxed if a transition is already queued.
+    await startForReal.dispatchEvent('click');
+    await expect.poll(() => releaseDelete !== undefined).toBe(true);
+    releaseDelete?.();
+    await expect(page).toHaveURL('/');
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('demo:')))).toEqual([]);
+    expect(protectedRequests).toEqual([]);
+    expect(demoAuthorizations.every((authorization) => authorization === '')).toBe(true);
+    await page.unroute('**/api/v1/demo/sessions/*');
+  }
+});
+
 test('resets and exits the isolated demo without retaining its namespace', async ({ page }) => {
   await page.goto('/?demo=1');
   await expect(page.getByText('Envelope signed. Demo data was not stored.')).toBeVisible();
@@ -227,7 +268,7 @@ test('resets and exits the isolated demo without retaining its namespace', async
   await page.getByText('Inspect signed JSON').click();
   const secondEnvelope = JSON.parse(await page.getByLabel('Signed evidence envelope JSON').textContent() || '{}').id;
   expect(secondEnvelope).not.toBe(firstEnvelope);
-  await page.getByRole('link', { name: 'Start for real' }).first().click();
+  await page.getByRole('button', { name: 'Start for real' }).first().click();
   await expect(page).toHaveURL('/');
   expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('demo:')))).toEqual([]);
 });

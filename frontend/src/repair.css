@@ -37,6 +37,7 @@ pre:focus-visible {
 /* Release QA: every navigation target remains a full-size control. */
 .brand,
 .site-header nav a,
+.site-header nav button,
 .footer-links a {
   min-height: 44px;
   display: inline-flex;
@@ -44,9 +45,30 @@ pre:focus-visible {
 }
 
 .site-header nav a,
+.site-header nav button,
 .footer-links a {
   min-width: 44px;
   justify-content: center;
+}
+
+.site-header nav .nav-action {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.site-header nav .nav-action:not(:disabled):hover {
+  text-decoration: underline;
+}
+
+.site-header nav .nav-action:disabled,
+.demo-banner button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .toggle input {

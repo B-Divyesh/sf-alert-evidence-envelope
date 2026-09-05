@@ -17,7 +17,7 @@ For on-call engineers and webhook consumers. It builds an evidence envelope from
 - Sends an email gateway webhook `subject`, `text`, and `envelope` fields.
 - Keeps separate delivery routes with their own inbound URLs, destinations, and redaction lists.
 
-SQLite stores route settings, short-lived demo session IDs, and delivery metadata. It does not store inbound bodies or evidence excerpts.
+SQLite stores route settings, short-lived demo session IDs, and delivery metadata. Demo workspaces expire after 24 hours. It does not store inbound bodies or evidence excerpts.
 
 ## Run locally
 

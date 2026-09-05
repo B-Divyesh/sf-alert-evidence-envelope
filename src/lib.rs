@@ -2025,7 +2025,7 @@ mod tests {
 
     #[tokio::test]
     async fn demo_session_is_ephemeral_and_cannot_reach_real_history() {
-        // @claim:isolated-demo
+        // @claim:demo-expiry
         let file = tempfile::NamedTempFile::new().unwrap();
         let database_url = format!("sqlite:{}", file.path().display());
         let state = create_state(

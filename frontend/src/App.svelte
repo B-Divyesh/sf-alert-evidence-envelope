@@ -70,6 +70,11 @@
   let demoSession = '';
   let demoRoute = demoRoutes[1];
   let routeAnnouncement = '';
+  let demoGeneration = 0;
+  let demoAbortController: AbortController | null = null;
+  let demoTask: Promise<void> | null = null;
+  let demoBusy = false;
+  let demoTransitioning = false;
 
   function markCrossDocumentNavigation() {
     sessionStorage.setItem(routeFocusKey, 'true');
@@ -171,10 +176,10 @@
     await focusAndAnnounceRoute();
   }
 
-  function navigate(event: MouseEvent, next: string, exitsDemo = false) {
+  async function navigate(event: MouseEvent, next: string, exitsDemo = false) {
     event.preventDefault();
-    if (exitsDemo) leaveDemo();
-    void setRoute(next);
+    if (exitsDemo) await leaveDemo();
+    await setRoute(next);
   }
 
   async function loadBuildIdentity() {
@@ -189,6 +194,15 @@
     const headers = new Headers(options.headers);
     headers.set('content-type', 'application/json');
     if (adminToken) headers.set('authorization', `Bearer ${adminToken}`);
+    const response = await fetch(pathname, { ...options, headers });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Request failed with HTTP ${response.status}`);
+    return body;
+  }
+
+  async function demoApi(pathname: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers);
+    headers.set('content-type', 'application/json');
     const response = await fetch(pathname, { ...options, headers });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Request failed with HTTP ${response.status}`);
@@ -274,43 +288,93 @@
     }
   }
 
-  async function runPreview() {
+  function currentDemoOperation(generation: number) {
+    return path === '/demo' && demoGeneration === generation;
+  }
+
+  function wasCancelled(error: unknown) {
+    return error instanceof DOMException && error.name === 'AbortError';
+  }
+
+  async function removeDemoSession(session: string) {
+    if (!session || !navigator.onLine) return;
+    await fetch(`/api/v1/demo/sessions/${session}`, { method: 'DELETE' }).catch(() => undefined);
+  }
+
+  async function runDemoPreview(session: string, route: typeof demoRoutes[number], generation: number, signal: AbortSignal) {
+    if (!currentDemoOperation(generation)) return;
     if (!navigator.onLine) {
       online = false;
-      if (path === '/demo' && preview) {
+      if (preview) {
         previewState = 'success';
         previewMessage = 'Offline sample ready. Demo data was not stored.';
-      } else {
-        previewState = 'error';
-        previewMessage = 'The relay is offline. Reconnect before building a preview.';
       }
       return;
     }
     previewState = 'loading'; previewMessage = 'Bounding and redacting evidence…'; preview = null;
     try {
+      const alert = JSON.parse(sampleAlert);
+      const result = await demoApi(`/api/v1/demo/sessions/${session}/preview`, {
+        method: 'POST', signal, body: JSON.stringify({
+          alert, redact_fields: route.fields, max_items: config.max_items, max_bytes: config.max_bytes,
+        }),
+      });
+      if (!currentDemoOperation(generation)) return;
+      preview = result;
+      localStorage.setItem(demoPreviewKey, JSON.stringify(result));
+      previewState = 'success';
+      previewMessage = 'Envelope signed. Demo data was not stored.';
+    } catch (error) {
+      if (!currentDemoOperation(generation) || wasCancelled(error)) return;
+      previewState = 'error';
+      previewMessage = error instanceof SyntaxError ? 'Sample alert is not valid JSON. Check commas and quotes.' : (error instanceof Error ? error.message : 'Preview failed');
+    }
+  }
+
+  async function runPreview() {
+    if (path === '/demo') {
+      const generation = demoGeneration;
+      const controller = demoAbortController;
+      if (!demoSession || !controller || !currentDemoOperation(generation)) return;
+      await runDemoPreview(demoSession, demoRoute, generation, controller.signal);
+      return;
+    }
+    if (!navigator.onLine) {
+      online = false;
+      previewState = 'error';
+      previewMessage = 'The relay is offline. Reconnect before building a preview.';
+      return;
+    }
+    previewState = 'loading'; previewMessage = 'Bounding and redacting evidence…'; preview = null;
+    try {
       const alert = JSON.parse(sample);
-      const endpoint = path === '/demo'
-        ? `/api/v1/demo/sessions/${demoSession}/preview`
-        : '/api/v1/preview';
-      preview = await api(endpoint, {
+      preview = await api('/api/v1/preview', {
         method: 'POST', body: JSON.stringify({
           alert,
-          redact_fields: path === '/demo' ? demoRoute.fields : redactText.split(',').map((v) => v.trim()).filter(Boolean),
+          redact_fields: redactText.split(',').map((v) => v.trim()).filter(Boolean),
           max_items: config.max_items, max_bytes: config.max_bytes,
         }),
       });
-      if (path === '/demo') localStorage.setItem(demoPreviewKey, JSON.stringify(preview));
       previewState = 'success';
-      previewMessage = path === '/demo'
-        ? 'Envelope signed. Demo data was not stored.'
-        : 'Envelope signed. Preview data was not stored.';
+      previewMessage = 'Envelope signed. Preview data was not stored.';
     } catch (error) {
       previewState = 'error';
       previewMessage = error instanceof SyntaxError ? 'Sample alert is not valid JSON. Check commas and quotes.' : (error instanceof Error ? error.message : 'Preview failed');
     }
   }
 
+  async function cancelDemoWork() {
+    const pending = demoTask;
+    demoGeneration += 1;
+    demoAbortController?.abort();
+    demoAbortController = null;
+    demoTask = null;
+    demoBusy = false;
+    if (pending) await pending;
+  }
+
   async function startDemo(reset: boolean) {
+    await cancelDemoWork();
     if (!navigator.onLine) {
       online = false;
       if (!preview) {
@@ -319,38 +383,74 @@
       }
       return;
     }
+    const generation = ++demoGeneration;
+    const controller = new AbortController();
+    demoAbortController = controller;
+    demoBusy = true;
     const previous = localStorage.getItem(demoSessionKey) || '';
-    if (reset && previous) {
-      await fetch(`/api/v1/demo/sessions/${previous}`, { method: 'DELETE' }).catch(() => undefined);
-      localStorage.removeItem(demoPreviewKey);
-    }
-    sample = sampleAlert;
-    preview = null;
-    previewState = 'loading';
-    previewMessage = 'Starting an isolated sample workspace…';
+    const task = (async () => {
+      try {
+        if (reset && previous) {
+          await removeDemoSession(previous);
+          if (!currentDemoOperation(generation)) return;
+        }
+        localStorage.removeItem(demoPreviewKey);
+        sample = sampleAlert;
+        preview = null;
+        previewState = 'loading';
+        previewMessage = 'Starting an isolated sample workspace…';
+        const response = await demoApi('/api/v1/demo/sessions', { method: 'POST', body: '{}', signal: controller.signal });
+        if (!currentDemoOperation(generation)) {
+          await removeDemoSession(response.id);
+          return;
+        }
+        demoSession = response.id;
+        localStorage.setItem(demoSessionKey, demoSession);
+        await runDemoPreview(demoSession, demoRoute, generation, controller.signal);
+      } catch (error) {
+        if (!currentDemoOperation(generation) || wasCancelled(error)) return;
+        previewState = 'error';
+        previewMessage = error instanceof Error ? error.message : 'The sample could not start.';
+      } finally {
+        if (currentDemoOperation(generation)) {
+          demoBusy = false;
+          demoTask = null;
+        }
+      }
+    })();
+    demoTask = task;
+    await task;
+  }
+
+  async function resetDemo() {
+    if (demoTransitioning || demoBusy) return;
+    demoTransitioning = true;
     try {
-      const response = await api('/api/v1/demo/sessions', { method: 'POST', body: '{}' });
-      demoSession = response.id;
-      localStorage.setItem(demoSessionKey, demoSession);
-      await runPreview();
-    } catch (error) {
-      previewState = 'error';
-      previewMessage = error instanceof Error ? error.message : 'The sample could not start.';
+      await startDemo(true);
+    } finally {
+      demoTransitioning = false;
     }
   }
 
   async function selectDemoRoute(id: string) {
+    if (demoBusy || demoTransitioning) return;
     demoRoute = demoRoutes.find((route) => route.id === id) || demoRoutes[0];
     localStorage.setItem(demoRouteKey, demoRoute.id);
     await runPreview();
   }
 
-  function leaveDemo() {
+  async function leaveDemo() {
+    demoTransitioning = true;
+    await cancelDemoWork();
     const session = localStorage.getItem(demoSessionKey);
-    if (session && online) void fetch(`/api/v1/demo/sessions/${session}`, { method: 'DELETE' });
     localStorage.removeItem(demoSessionKey);
     localStorage.removeItem(demoPreviewKey);
     localStorage.removeItem(demoRouteKey);
+    preview = null;
+    previewState = 'idle';
+    await removeDemoSession(session || demoSession);
+    demoSession = '';
+    demoTransitioning = false;
   }
 
   async function copy(value: string, message: string) {
@@ -411,8 +511,8 @@
   </a>
   <nav aria-label="Primary navigation">
     {#if path === '/'}
-    <a href="/?demo=1" onclick={(event) => navigate(event, '/?demo=1')}>Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
-    {:else if path === '/demo'}<a href="/" onclick={(event) => navigate(event, '/', true)}>Start for real</a><a href="/privacy">Privacy</a>
+    <a href="/?demo=1" onclick={(event) => void navigate(event, '/?demo=1')}>Demo</a><a href="#configure">Configure</a><a href="/privacy">Privacy</a>
+    {:else if path === '/demo'}<button class="nav-action" type="button" onclick={(event) => void navigate(event, '/', true)} disabled={demoBusy || demoTransitioning}>Start for real</button><a href="/privacy">Privacy</a>
     {:else}<a href="/">Home</a><a href="/?demo=1">Demo</a><a href="#main" aria-current="page">{path === '/privacy' ? 'Privacy' : 'Terms'}</a>{/if}
   </nav>
   <span class:offline={!online} class="network"><i></i>{online ? 'Browser online' : 'Browser offline'}</span>
@@ -422,8 +522,8 @@
   <aside class="demo-banner" aria-label="Demo status">
     <strong>Demo — sample data, nothing is saved</strong>
     <span>Isolated workspace expires after 24 hours.</span>
-    <button type="button" onclick={() => startDemo(true)}>Reset demo</button>
-    <a href="/" onclick={(event) => navigate(event, '/', true)}>Start for real</a>
+    <button type="button" onclick={() => void resetDemo()} disabled={demoBusy || demoTransitioning}>Reset demo</button>
+    <button type="button" onclick={(event) => void navigate(event, '/', true)} disabled={demoBusy || demoTransitioning}>Start for real</button>
   </aside>
 {/if}
 
@@ -432,7 +532,7 @@
   <article class="legal">
     <p class="eyebrow">Privacy notice</p><h1>How this relay handles data</h1>
     <p class="lede">The self-hosted core transforms incident data without retaining raw alert bodies or fetched logs.</p>
-    <h2>What the relay stores</h2><p>SQLite stores route settings, short-lived demo session IDs, and the latest 20 delivery records. Demo session rows contain only an ID and expiry time. The relay does not store raw alerts, evidence, or license tokens.</p>
+    <h2>What the relay stores</h2><p>SQLite stores route settings, short-lived demo session IDs, and the latest 20 delivery records. Demo workspaces expire after 24 hours. Demo session rows contain only an ID and expiry time. The relay does not store raw alerts, evidence, or license tokens.</p>
     <h2>Where secrets live</h2><p>The relay reads configured secrets from its environment or protected files on the server. Destination and source URLs may be stored in SQLite. License tokens and paid presets are stored in your browser.</p>
     <h2>Network requests</h2><p>The relay contacts only endpoints you configure. License verification sends the stored token to Sociobot in an authorization header. The browser waits 24 hours after each attempt. There are no analytics, advertising cookies, third-party scripts, or hosted fonts.</p>
     <h2>Control and deletion</h2><p>The operator controls the SQLite database and browser storage. Remove the database or clear site data to delete them.</p>
@@ -455,7 +555,7 @@
       <p class="eyebrow">Add evidence to webhook alerts</p>
       <h1 id="hero-title">Add redacted evidence to webhook alerts</h1>
       <p class="lede">For on-call engineers and webhook consumers who need incident context without another dashboard login.</p>
-      <div class="hero-actions"><a class="button primary" href="/?demo=1" onclick={(event) => navigate(event, '/?demo=1')}>Try it with sample data</a><a class="button secondary" href="#configure">Configure your route</a></div>
+      <div class="hero-actions"><a class="button primary" href="/?demo=1" onclick={(event) => void navigate(event, '/?demo=1')}>Try it with sample data</a><a class="button secondary" href="#configure">Configure your route</a></div>
       <p class="action-note">The sample opens a signed, redacted envelope in an isolated workspace.</p>
       <ul class="trust-list" aria-label="Product facts"><li>Demo data is never added to route history</li><li>No analytics or third-party scripts</li><li>The self-hosted core is free. Field Kit costs $39 once.</li></ul>
     </div>
@@ -503,7 +603,7 @@
   <section id="test" class="test-bench" aria-labelledby="test-title">
     <div class="section-heading"><p class="eyebrow">Envelope preview</p>{#if path === '/demo'}<h1 id="test-title">Inspect a sample evidence envelope</h1><p>The sample runs in an isolated workspace without changing protected routes.</p>{:else}<h2 id="test-title">Inspect an envelope before delivery</h2><p>Preview applies the live route’s bounds, redaction, fingerprint, and signature. It does not add delivery history.</p>{/if}</div>
     <div class="bench-grid">
-      <div>{#if path === '/demo'}<div class="demo-routes" aria-label="Sample routes">{#each demoRoutes as route}<button type="button" class:active={demoRoute.id === route.id} onclick={() => selectDemoRoute(route.id)}><b>{route.name}</b><span>{route.destination} · removes {route.fields.join(' and ')}</span></button>{/each}</div>{/if}<label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={runPreview} disabled={previewState === 'loading'}>{previewState === 'loading' ? 'Sealing…' : 'Build signed preview'}</button></div>
+      <div>{#if path === '/demo'}<div class="demo-routes" aria-label="Sample routes">{#each demoRoutes as route}<button type="button" class:active={demoRoute.id === route.id} onclick={() => void selectDemoRoute(route.id)} disabled={demoBusy || demoTransitioning}><b>{route.name}</b><span>{route.destination} · removes {route.fields.join(' and ')}</span></button>{/each}</div>{/if}<label for="sample-json">Sample alert JSON</label><textarea id="sample-json" class="code-area" bind:value={sample} spellcheck="false"></textarea><button class="button amber" type="button" onclick={() => void runPreview()} disabled={previewState === 'loading' || demoBusy || demoTransitioning}>{previewState === 'loading' ? 'Sealing…' : 'Build signed preview'}</button></div>
       <div class="envelope-output" class:demo-output={path === '/demo'} data-demo-result={path === '/demo' && previewState === 'success' ? 'complete' : undefined} aria-busy={previewState === 'loading'}>
         {#if previewState === 'idle'}<div class="empty"><svg aria-hidden="true" viewBox="0 0 64 64"><path d="M9 18h46v32H9zM10 20l22 17 22-17"/><path d="M24 12c5-5 11-5 16 0"/></svg><h3>No envelope yet</h3><p>Use the sample as-is or paste a realistic alert with sensitive values removed.</p></div>
         {:else if previewState === 'loading'}<div class="empty"><div class="loader" aria-hidden="true"></div><h3>Building the envelope</h3><p>Bounding → redacting → fingerprinting → signing</p></div>
